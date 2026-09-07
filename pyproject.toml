@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "goatcode"
+version = "0.1.0"
+description = "Agnostic terminal coding agent — every provider, OAuth or API key, built for low-RAM machines."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Arhan" }]
+keywords = ["cli", "agent", "llm", "coding", "tui", "oauth"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+]
+dependencies = [
+  "httpx>=0.27,<1",
+  "rich>=13.7,<15",
+  "prompt_toolkit>=3.0,<4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+goat = "goatcode.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Arhan-w/GoatCode"
+
+[tool.setuptools.packages.find]
+include = ["goatcode*"]
+
+[tool.setuptools.package-data]
+goatcode = ["data/*.json"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
