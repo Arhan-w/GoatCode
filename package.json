@@ -1,10 +1,16 @@
 {
-  "name": "goatcode-ts",
+  "name": "goatcode",
+  "version": "2.0.0",
+  "description": "Every provider. One terminal. Agentic coding CLI with MCP, skills and plugins.",
   "module": "src/index.ts",
   "type": "module",
+  "bin": { "goat": "./src/index.ts" },
   "scripts": {
     "start": "bun run src/index.ts",
-    "dev": "bun --watch src/index.ts"
+    "dev": "bun --watch src/index.ts",
+    "test": "bun test",
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "compile": "bun build src/index.ts --compile --outfile dist/goat"
   },
   "private": true,
   "devDependencies": {

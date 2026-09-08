@@ -1,0 +1,29 @@
+name: Release binaries
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            out: goat-windows-x64.exe
+          - os: ubuntu-latest
+            out: goat-linux-x64
+          - os: macos-latest
+            out: goat-darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun build src/index.ts --compile --outfile ${{ matrix.out }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.out }}
