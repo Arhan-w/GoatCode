@@ -1,0 +1,28 @@
+{
+  "name": "goatcode-ts",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts"
+  },
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/react": "^19.2.18",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ink": "^7.1.1",
+    "ink-text-input": "^6.0.0",
+    "marked": "^18.0.12",
+    "marked-terminal": "^7.3.0",
+    "react": "^19.2.8",
+    "react-devtools-core": "^7.0.1",
+    "zod": "^4.5.4"
+  },
+  "bun": {
+    "tsconfig": "tsconfig.json"
+  }
+}
