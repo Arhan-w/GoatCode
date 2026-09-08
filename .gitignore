@@ -3,3 +3,6 @@ dist/
 *.log
 .DS_Store
 goatcode.local.json
+scripts/input-log.txt
+scripts/pty-capture.txt
+scripts/pty-turn.txt
