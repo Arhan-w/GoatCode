@@ -108,9 +108,9 @@ export async function loginOauth(providerId: string, io: LoginIO, manualPaste = 
     try {
       if (io.openBrowser) io.openBrowser(url);
       else {
-        const cmd = process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
+        const [binary, args] = process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
           : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
-        Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" });
+        Bun.spawn([binary, ...args], { stdout: "ignore", stderr: "ignore" });
       }
     } catch {
       io.print(`If nothing opened, visit:\n  ${url}`);

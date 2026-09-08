@@ -27,7 +27,8 @@ markdown under a live spinner, sandboxed tools with permission prompts,
 | Modes | auto-approve toggle | **4-mode cycle** (shift+tab): ask · accept-edits · plan · bypass |
 | Extensibility | — | **MCP servers** (stdio/http/sse) · **skills** (SKILL.md) · **plugins** |
 | Context | — | **@file references** · **!bash mode** · **# memory** → GOAT.md |
-| Engine | 60 tests | same 4 wire formats, OAuth flows, sessions, compaction — **23 TS tests + full e2e** |
+| Resilience | one-shot failure | **retry w/ jittered backoff** on 429/5xx/network, `retry-after` honored, esc interrupts mid-request |
+| Engine | 60 tests | same 4 wire formats, OAuth flows, sessions, compaction — **37 TS tests + full e2e** |
 
 ## Install
 
@@ -100,6 +101,10 @@ Claude Code's interaction model, GoatCode's engine:
 | `/tasks` | background bash jobs started with `bash background:true` |
 | `/cost` `/context` `/doctor` `/init` `/review` | diagnostics |
 
+**`/compact` is real** — it folds older messages into a deterministic digest
+and keeps the tail, so long sessions stay inside the window without an
+extra API call.
+
 **Plan mode is enforced, not decorative** — in `⏸ plan`, every mutating tool
 (write/edit/bash) is denied at dispatch with instructions to leave the mode.
 
@@ -107,6 +112,12 @@ Claude Code's interaction model, GoatCode's engine:
 `/undo` rewinds the whole last turn, including files the agent created
 (those get deleted). **Background tasks** — the agent can start long jobs
 and keep working; finished jobs are announced between turns.
+
+**It survives flaky APIs** — a 429, 5xx, or dropped connection before any
+tokens stream is retried with capped exponential backoff + jitter (honoring
+the server's `retry-after`), shown inline as `↻ retrying`. Once output has
+streamed, GoatCode stops instead of retrying — no duplicated answers. Esc
+interrupts even mid-backoff.
 
 ## MCP servers
 
@@ -185,6 +196,8 @@ Tokens live in `~/.goatcode/credentials.json` and auto-refresh before expiry.
 - **Undo checkpoints** — every write/edit snapshots before/after; `/undo`
   rewinds the last turn, deleting files the agent created.
 - **Bounded output** — 128 KB per read, 32 KB per bash call, 500 KB per snapshot.
+- **Config hygiene** — `goat mcp add` never leaks a project's `.mcp.json`
+  servers into your user config, and hand-edited keys survive every save.
 
 ## Performance
 
@@ -192,13 +205,15 @@ Tokens live in `~/.goatcode/credentials.json` and auto-refresh before expiry.
 |---|---|
 | Cold start (`goat --version`) | **~0.6 s** (binary) |
 | Binary | single file, no runtime install |
-| Tests | 28 bun tests + live e2e (providers, MCP, skills, agent loop, undo) |
+| Tests | 37 bun tests + live e2e (providers, MCP, skills, agent loop, undo, retry) |
+| Type check | `tsc --noEmit` clean, strict |
 
 ## Development
 
 ```bash
 bun install
-bun test                    # 23 tests, ~2s, no network
+bun test                    # 37 tests, ~5s, no network
+bunx tsc --noEmit           # strict type check
 bun run src/index.ts        # dev TUI
 bun build src/index.ts --compile --outfile dist/goat   # ship it
 ```

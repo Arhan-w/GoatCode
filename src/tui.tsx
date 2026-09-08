@@ -14,7 +14,7 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join, relative, resolve as resolvePath } from "node:path";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Agent, type AgentEvent } from "./agent.ts";
-import { SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
+import { COMMAND_DESC, SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
 import { appDir, loadConfig, saveConfig, type GoatConfig } from "./config.ts";
 import { ProviderRegistry } from "./providers.ts";
 import { ResolveError, resolve } from "./runtime.ts";
@@ -223,7 +223,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       setStream("");
     };
     try {
-      for await (const ev of agent.runTurn(text)) {
+      for await (const ev of agent.runTurn(text, ctrl.signal)) {
         if (ctrl.signal.aborted) break;
         switch (ev.kind) {
           case "text":
@@ -261,6 +261,15 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
             if (mm) setTokens(Number(mm[2]));
             break;
           }
+          case "retry":
+            flush();
+            push(
+              <Text>
+                <Text color="#facc15">↻ retrying</Text>
+                <Text dimColor color={DIM}>  attempt {ev.attempt + 1} in {(ev.waitMs / 1000).toFixed(1)}s — {ev.reason}</Text>
+              </Text>,
+            );
+            break;
           case "error":
             flush();
             push(<Text color={RED}>✗ {ev.text}</Text>);
@@ -475,7 +484,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
             {completions.map((c, i) => (
               <Text key={c}>
                 <Text color={i === compSel ? ACCENT : undefined} inverse={i === compSel}>{c}</Text>
-                <Text dimColor color={DIM}>  {descOf(c)}</Text>
+                <Text dimColor color={DIM}>  {COMMAND_DESC[c]}</Text>
               </Text>
             ))}
           </Box>
@@ -496,20 +505,6 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       </Box>
     </Box>
   );
-}
-
-function descOf(cmd: string): string {
-  const map: Record<string, string> = {
-    "/help": "show help", "/model": "switch model", "/models": "list models",
-    "/providers": "list providers", "/auth": "add credentials", "/logout": "clear credentials",
-    "/new": "new session", "/clear": "clear context", "/compact": "compact context",
-    "/sessions": "list sessions", "/resume": "resume a session", "/mcp": "manage MCP servers",
-    "/skills": "list skills", "/plugin": "manage plugins", "/cost": "session cost",
-    "/context": "context usage", "/config": "open config", "/doctor": "diagnose install",
-    "/init": "create GOAT.md", "/review": "review a PR", "/undo": "revert last turn's file changes",
-    "/tasks": "list background bash tasks", "/quit": "exit",
-  };
-  return map[cmd] ?? "";
 }
 
 // ---------- sub-components ----------

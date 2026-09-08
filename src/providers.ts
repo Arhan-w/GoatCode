@@ -199,7 +199,7 @@ export class CredentialStore {
         this.cache = {};
       }
     }
-    return this.cache;
+    return this.cache ?? {};
   }
 
   get(providerId: string): Credential | null {

@@ -13,11 +13,13 @@ export const McpStdioServerSchema = z.object({
   args: z.array(z.string()).default([]),
   env: z.record(z.string(), z.string()).optional(),
 });
+export type McpStdioServer = z.infer<typeof McpStdioServerSchema>;
 export const McpRemoteServerSchema = z.object({
   type: z.enum(["http", "sse"]),
   url: z.string().url(),
   headers: z.record(z.string(), z.string()).optional(),
 });
+export type McpRemoteServer = z.infer<typeof McpRemoteServerSchema>;
 export const McpServerConfigSchema = z.discriminatedUnion("type", [
   McpStdioServerSchema,
   McpRemoteServerSchema,

@@ -36,7 +36,40 @@ export interface StreamEvent {
   error?: string;
 }
 
-export class LLMError extends Error {}
+export class LLMError extends Error {
+  /** HTTP status when the failure came from a response, else undefined. */
+  status?: number;
+  /** Seconds parsed from a retry-after header, when the server sent one. */
+  retryAfterSec?: number;
+  constructor(message: string, opts?: { status?: number; retryAfterSec?: number }) {
+    super(message);
+    this.name = "LLMError";
+    this.status = opts?.status;
+    this.retryAfterSec = opts?.retryAfterSec;
+  }
+}
+
+const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+const NETWORK_HINTS = ["fetch failed", "enotfound", "eai_again", "etimedout", "econnreset", "econnrefused", "socket hang up", "network", "timed out", "terminated"];
+
+/** Transient enough to retry: 429/5xx, or a network-level failure. User aborts are never retryable. */
+export function isRetryableLLMError(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const err = e as { name?: string; message?: string; status?: number };
+  if (err.name === "AbortError") return false;
+  if (typeof err.status === "number") return RETRYABLE_STATUS.has(err.status);
+  const msg = String(err.message ?? "").toLowerCase();
+  return NETWORK_HINTS.some((h) => msg.includes(h));
+}
+
+function retryAfterSeconds(res: Response): number | undefined {
+  const v = res.headers.get("retry-after");
+  if (!v) return undefined;
+  const secs = Number(v);
+  if (Number.isFinite(secs)) return Math.max(0, secs);
+  const date = Date.parse(v);
+  return Number.isNaN(date) ? undefined : Math.max(0, (date - Date.now()) / 1000);
+}
 
 export interface StreamOpts {
   model: string;
@@ -89,7 +122,9 @@ async function postJson(
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new LLMError(`HTTP ${res.status}: ${text.slice(0, 600)}`);
+    throw new LLMError(`HTTP ${res.status}: ${text.slice(0, 600)}`, {
+      status: res.status, retryAfterSec: retryAfterSeconds(res),
+    });
   }
   return res;
 }
@@ -128,7 +163,7 @@ export class OpenAIChatClient implements ChatClient {
       max_tokens: opts.maxTokens,
       stream: true,
       stream_options: { include_usage: true },
-      messages: messages.flatMap((m) => {
+      messages: messages.flatMap((m): any[] => {
         if (m.role === "system") return [{ role: "system", content: m.content }];
         if (m.role === "tool")
           return [{ role: "tool", tool_call_id: m.toolCallId, content: m.content }];
@@ -380,7 +415,7 @@ export class GeminiClient implements ChatClient {
   }
 
   private headers(): Record<string, string> {
-    const auth = this.authToken
+    const auth: Record<string, string> = this.authToken
       ? { authorization: `Bearer ${this.authToken}` }
       : { "x-goog-api-key": this.apiKey ?? "" };
     return { ...auth, ...(this.extraHeaders ?? {}) };

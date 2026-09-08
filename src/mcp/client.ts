@@ -7,7 +7,7 @@
  */
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { McpServerConfigSchema } from "./types.ts";
+import { McpServerConfigSchema, type McpServerConfig } from "./types.ts";
 import type { ToolSpec } from "../llm.ts";
 import type { ToolResult } from "../tools.ts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -53,7 +53,8 @@ export class McpClient {
     } else if (config.type === "sse") {
       transport = new SSEClientTransport(new URL(config.url), { requestInit: { headers: config.headers } });
     } else {
-      transport = new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers: config.headers } });
+      const remote = config as import("./types.ts").McpRemoteServer;
+      transport = new StreamableHTTPClientTransport(new URL(remote.url), { requestInit: { headers: remote.headers } });
     }
 
     const client = new Client({ name: `goatcode-${name}`, version: "0.1.0" });

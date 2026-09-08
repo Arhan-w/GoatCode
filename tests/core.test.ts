@@ -420,3 +420,188 @@ describe("background bash", () => {
     rmSync(root, { recursive: true, force: true });
   });
 });
+
+// ---------- retry / resilience ----------
+describe("retry", () => {
+  test("isRetryableLLMError classifies by status and message", async () => {
+    const { LLMError, isRetryableLLMError } = await import("../src/llm.ts");
+    expect(isRetryableLLMError(new LLMError("HTTP 429: slow down", { status: 429 }))).toBe(true);
+    expect(isRetryableLLMError(new LLMError("HTTP 503: busy", { status: 503 }))).toBe(true);
+    expect(isRetryableLLMError(new LLMError("HTTP 400: bad req", { status: 400 }))).toBe(false);
+    expect(isRetryableLLMError(new LLMError("fetch failed: ECONNRESET"))).toBe(true);
+    const abort = new LLMError("aborted");
+    abort.name = "AbortError";
+    expect(isRetryableLLMError(abort)).toBe(false);
+  });
+
+  test("agent retries a 429 then succeeds", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const { LLMError } = await import("../src/llm.ts");
+    let calls = 0;
+    const client = {
+      async *streamChat() {
+        calls++;
+        if (calls === 1) throw new LLMError("HTTP 429: rate limited", { status: 429, retryAfterSec: undefined });
+        yield { textDelta: "recovered" };
+      },
+    } as any;
+    const agent = new Agent({
+      client, session: Session.new(home, "mock/m"), tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 2, retryBaseMs: 10,
+    });
+    const events: string[] = [];
+    let text = "";
+    for await (const ev of agent.runTurn("hi")) {
+      events.push(ev.kind);
+      if (ev.kind === "text") text += ev.text;
+      if (ev.kind === "retry") expect(ev.attempt).toBe(1);
+    }
+    expect(text).toBe("recovered");
+    expect(events).toContain("retry");
+    expect(calls).toBe(2);
+  });
+
+  test("a 400 error is surfaced without retrying", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const { LLMError } = await import("../src/llm.ts");
+    let calls = 0;
+    const client = {
+      async *streamChat() { calls++; throw new LLMError("HTTP 400: invalid api key", { status: 400 }); },
+    } as any;
+    const agent = new Agent({
+      client, session: Session.new(home, "mock/m"), tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 2, retryBaseMs: 10,
+    });
+    const kinds: string[] = [];
+    for await (const ev of agent.runTurn("hi")) kinds.push(ev.kind);
+    expect(kinds.filter((k) => k === "retry")).toHaveLength(0);
+    expect(kinds).toContain("error");
+    expect(calls).toBe(1);
+  });
+
+  test("partial streamed text is not retried (avoids duplicate output)", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const { LLMError } = await import("../src/llm.ts");
+    let calls = 0;
+    const client = {
+      async *streamChat() {
+        calls++;
+        yield { textDelta: "half an answer" };
+        throw new LLMError("HTTP 500: boom", { status: 500 });
+      },
+    } as any;
+    const agent = new Agent({
+      client, session: Session.new(home, "mock/m"), tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 2, retryBaseMs: 10,
+    });
+    const kinds: string[] = [];
+    for await (const ev of agent.runTurn("hi")) kinds.push(ev.kind);
+    expect(kinds).not.toContain("retry");
+    expect(kinds).toContain("error");
+    expect(calls).toBe(1);
+  });
+
+  test("retry-after hint is respected (capped)", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const { LLMError } = await import("../src/llm.ts");
+    let calls = 0;
+    const client = {
+      async *streamChat() {
+        calls++;
+        if (calls === 1) throw new LLMError("HTTP 429", { status: 429, retryAfterSec: 0.02 });
+        yield { textDelta: "ok" };
+      },
+    } as any;
+    const agent = new Agent({
+      client, session: Session.new(home, "mock/m"), tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 2, retryBaseMs: 10,
+    });
+    let waitMs = -1;
+    for await (const ev of agent.runTurn("hi")) if (ev.kind === "retry") waitMs = ev.waitMs;
+    expect(waitMs).toBe(20); // honored exactly, not the jittered backoff
+  });
+});
+
+// ---------- config round-trip ----------
+describe("config persistence", () => {
+  test("saveConfig preserves unknown keys and excludes project .mcp.json servers", async () => {
+    const { loadConfig, saveConfig, configPath } = await import("../src/config.ts");
+    const proj = mkdtempSync(join(tmpdir(), "goat-save-"));
+    writeFileSync(join(home, "config.json"), JSON.stringify({
+      model: "groq/llama-3.3-70b",
+      hand_edited_key: { keep: true },
+      mcpServers: { user_server: { command: "user-cmd" } },
+    }));
+    writeFileSync(join(proj, ".mcp.json"), JSON.stringify({
+      mcpServers: { proj_server: { command: "proj-cmd" } },
+    }));
+    const cfg = loadConfig(proj);
+    expect(cfg.mcpServers.proj_server).toBeDefined(); // visible at runtime
+    cfg.endpoints["myapi"] = {
+      id: "myapi", baseUrl: "http://x/v1", format: "openai", models: ["m1"], label: "myapi",
+    };
+    saveConfig(cfg);
+    const saved = JSON.parse(readFileSync(configPath(), "utf8"));
+    expect(saved.hand_edited_key).toEqual({ keep: true });        // unknown key survived
+    expect(saved.mcpServers.user_server).toBeDefined();           // user server persisted
+    expect(saved.mcpServers.proj_server).toBeUndefined();         // project server NOT leaked
+    expect(saved.endpoints.myapi.base_url).toBe("http://x/v1");
+    expect(saved.max_tokens).toBe(8192);
+    rmSync(proj, { recursive: true, force: true });
+  });
+
+  test("GOAT_TEMPERATURE and GOAT_MAX_STEPS env overrides", async () => {
+    const { loadConfig } = await import("../src/config.ts");
+    process.env.GOAT_TEMPERATURE = "0.2";
+    process.env.GOAT_MAX_STEPS = "7";
+    const cfg = loadConfig(home);
+    expect(cfg.temperature).toBeCloseTo(0.2);
+    expect(cfg.maxSteps).toBe(7);
+    delete process.env.GOAT_TEMPERATURE;
+    delete process.env.GOAT_MAX_STEPS;
+  });
+});
+
+// ---------- sessions ----------
+describe("session ids", () => {
+  test("two sessions created in the same second get different ids", async () => {
+    const { Session } = await import("../src/session.ts");
+    const a = Session.new(home, "mock/m");
+    const b = Session.new(home, "mock/m");
+    expect(a.id).not.toBe(b.id);
+  });
+});
+
+// ---------- /compact ----------
+describe("compact command", () => {
+  test("/compact folds old messages and never starts the window on a tool msg", async () => {
+    const { runSlash } = await import("../src/commands.tsx");
+    const { Session } = await import("../src/session.ts");
+    const s = Session.new(home, "mock/m");
+    for (let i = 0; i < 20; i++)
+      s.messages.push(i % 9 === 8
+        ? { role: "tool", content: "r", toolCallId: `t${i}`, name: "read" }
+        : { role: "user", content: `msg ${i}` });
+    let out = "";
+    const io = {
+      session: s,
+      push: (n: any) => { out = JSON.stringify(n) ?? out; },
+      cfg: { model: "mock/m", maxTokens: 8192, autoApprove: false } as any,
+      setCfg: () => {}, registry: null as any, setSession: () => {}, saveCfg: () => {},
+      exit: () => {}, mcp: null, skills: [], undoTurn: () => 0, backgroundTasks: () => [],
+      setMode: () => {}, runTurn: async () => {},
+    };
+    expect(runSlash("/compact", io)).toBe(true);
+    expect(s.compactedFrom).toBeGreaterThan(0);
+    expect(s.messages[s.compactedFrom].role).not.toBe("tool");
+    expect(s.context().length).toBeLessThan(20);
+  });
+});

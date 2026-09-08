@@ -240,7 +240,7 @@ export class ToolKit {
     try { text = readFileSync(p, "utf8"); } catch { return { ok: false, output: `${args.path} is not UTF-8 text` }; }
     const lines = text.split("\n");
     const offset = Math.max(1, Number(args.offset ?? 1));
-    const limit = Number(args.limit ?? 2000);
+    const limit = Math.max(1, Number(args.limit ?? 2000));
     const chunk = lines.slice(offset - 1, offset - 1 + limit);
     let out = chunk.map((ln, i) => `${String(offset + i).padStart(5)}\t${ln}`).join("\n");
     const remaining = Math.max(0, lines.length - (offset - 1) - chunk.length);

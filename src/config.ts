@@ -47,6 +47,8 @@ export interface GoatConfig {
   endpoints: Record<string, CustomEndpoint>;
   mcpServers: Record<string, McpServerConfig>;
   pluginDirs: string[];
+  /** Server names that came from the project .mcp.json — never persisted to user config. */
+  projectMcpNames: Set<string>;
 }
 
 export function appDir(): string {
@@ -105,6 +107,7 @@ export function loadConfig(projectDir: string = process.cwd()): GoatConfig {
     endpoints: {},
     mcpServers: { ...(data.mcpServers ?? {}) },
     pluginDirs: Array.isArray(data.plugins) ? data.plugins : [],
+    projectMcpNames: new Set(),
   };
   for (const [pid, ed] of Object.entries<any>(data.endpoints ?? {})) {
     if (ed && typeof ed === "object") cfg.endpoints[pid] = endpointFrom(pid, ed);
@@ -114,7 +117,10 @@ export function loadConfig(projectDir: string = process.cwd()): GoatConfig {
   const mcpJson = parseJson(join(projectDir, MCP_FILE_NAME));
   if (mcpJson.mcpServers) {
     for (const [name, sc] of Object.entries<any>(mcpJson.mcpServers)) {
-      if (sc && typeof sc === "object") cfg.mcpServers[name] = sc as McpServerConfig;
+      if (sc && typeof sc === "object") {
+        cfg.mcpServers[name] = sc as McpServerConfig;
+        cfg.projectMcpNames.add(name); // tracked so saveConfig never persists it
+      }
     }
   }
 
@@ -126,15 +132,34 @@ export function loadConfig(projectDir: string = process.cwd()): GoatConfig {
     const n = parseInt(process.env.GOAT_MAX_TOKENS, 10);
     if (!Number.isNaN(n)) cfg.maxTokens = n;
   }
+  if (process.env.GOAT_TEMPERATURE) {
+    const n = parseFloat(process.env.GOAT_TEMPERATURE);
+    if (!Number.isNaN(n)) cfg.temperature = n;
+  }
+  if (process.env.GOAT_MAX_STEPS) {
+    const n = parseInt(process.env.GOAT_MAX_STEPS, 10);
+    if (!Number.isNaN(n)) cfg.maxSteps = n;
+  }
   splitModel(cfg);
   return cfg;
 }
 
-/** Persist user-level config (model, endpoints, mcp servers). */
+/**
+ * Persist user-level config. Merges into the existing file so hand-edited or
+ * future keys survive the round-trip; project .mcp.json servers are excluded.
+ */
 export function saveConfig(cfg: GoatConfig): void {
-  const payload: Record<string, unknown> = { model: cfg.model, max_tokens: cfg.maxTokens };
-  if (Object.keys(cfg.endpoints).length) {
-    payload.endpoints = Object.fromEntries(
+  const prev = parseJson(configPath());
+  const userMcp: Record<string, McpServerConfig> = {};
+  for (const [name, sc] of Object.entries(cfg.mcpServers))
+    if (!cfg.projectMcpNames?.has(name)) userMcp[name] = sc;
+  const payload: Record<string, unknown> = {
+    ...prev,
+    model: cfg.model,
+    max_tokens: cfg.maxTokens,
+    max_steps: cfg.maxSteps,
+    auto_approve: cfg.autoApprove,
+    endpoints: Object.fromEntries(
       Object.entries(cfg.endpoints).map(([pid, ep]) => [
         pid,
         {
@@ -145,9 +170,10 @@ export function saveConfig(cfg: GoatConfig): void {
           ...(ep.models.length ? { models: ep.models } : {}),
         },
       ]),
-    );
-  }
-  if (Object.keys(cfg.mcpServers).length) payload.mcpServers = cfg.mcpServers;
+    ),
+    mcpServers: userMcp,
+  };
+  if (cfg.temperature != null) payload.temperature = cfg.temperature;
   writeFileSync(configPath(), JSON.stringify(payload, null, 2), "utf8");
 }
 

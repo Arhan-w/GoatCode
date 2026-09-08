@@ -172,7 +172,8 @@ async function main(): Promise<number> {
   }
 
   if (sub === "resume") {
-    return run(cfg, argv[1]);
+    run(cfg, argv[1]);
+    return 0;
   }
 
   // one-shot print mode
@@ -208,6 +209,7 @@ async function main(): Promise<number> {
     for await (const ev of agent.runTurn(expandedPrompt)) {
       if (ev.kind === "text") { out += ev.text; if (!quiet) process.stdout.write(ev.text); }
       else if (ev.kind === "tool_start" && !quiet) process.stderr.write(`\n[tool ${ev.tool} ${JSON.stringify(ev.args).slice(0, 100)}]\n`);
+      else if (ev.kind === "retry") process.stderr.write(`\n[retry attempt ${ev.attempt + 1} in ${(ev.waitMs / 1000).toFixed(1)}s: ${ev.reason}]\n`);
       else if (ev.kind === "error") { process.stderr.write(`\nerror: ${ev.text}\n`); await mcp?.shutdown(); return 1; }
     }
     if (out && !quiet) process.stdout.write("\n");
@@ -216,7 +218,8 @@ async function main(): Promise<number> {
   }
 
   // interactive TUI
-  return run(cfg);
+  run(cfg);
+  return 0;
 }
 
 main().then((code) => process.exit(code)).catch((e) => {

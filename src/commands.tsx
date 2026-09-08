@@ -149,7 +149,20 @@ export function runSlash(line: string, io: SlashIO): boolean {
     }
 
     case "/compact": {
-      io.push(<Text dimColor color="#8a8a8a">  context will rebuild from the session tail on the next message</Text>);
+      const msgs = io.session.messages;
+      if (msgs.length <= 12) {
+        io.push(<Text dimColor color="#8a8a8a">  nothing to compact yet — context is still small</Text>);
+        return true;
+      }
+      let cut = Math.max(0, msgs.length - 8);
+      while (cut < msgs.length && msgs[cut]?.role === "tool") cut++;
+      if (cut <= io.session.compactedFrom) {
+        io.push(<Text dimColor color="#8a8a8a">  already compacted — {io.session.compactedFrom} older messages are folded into the digest</Text>);
+        return true;
+      }
+      io.session.compactedFrom = cut;
+      io.session.save();
+      io.push(<Text color="#4ade80">✓ folded {cut} older messages into the summary digest — the next request uses the tail</Text>);
       return true;
     }
 
@@ -353,16 +366,17 @@ function HelpList() {
   );
 }
 
+export const COMMAND_DESC: Record<string, string> = {
+  "/help": "show help", "/model": "switch model", "/models": "list models",
+  "/providers": "list providers", "/auth": "add credentials", "/logout": "clear credentials",
+  "/new": "new session", "/clear": "clear context", "/compact": "fold old context into a digest",
+  "/sessions": "list sessions", "/resume": "resume a session", "/mcp": "manage MCP servers",
+  "/skills": "list skills", "/plugin": "manage plugins", "/cost": "session cost",
+  "/context": "context usage", "/config": "open config", "/doctor": "diagnose install",
+  "/init": "create GOAT.md", "/review": "review a PR", "/undo": "revert last turn's file changes",
+  "/tasks": "list background bash tasks", "/quit": "exit",
+};
+
 function descOf(cmd: string): string {
-  const map: Record<string, string> = {
-    "/help": "show help", "/model": "switch model", "/models": "list models",
-    "/providers": "list providers", "/auth": "add credentials", "/logout": "clear credentials",
-    "/new": "new session", "/clear": "clear context", "/compact": "compact context",
-    "/sessions": "list sessions", "/resume": "resume a session", "/mcp": "manage MCP servers",
-    "/skills": "list skills", "/plugin": "manage plugins", "/cost": "session cost",
-    "/context": "context usage", "/config": "open config", "/doctor": "diagnose install",
-    "/init": "create GOAT.md", "/review": "review a PR", "/undo": "revert last turn's file changes",
-    "/tasks": "list background bash tasks", "/quit": "exit",
-  };
-  return map[cmd] ?? "";
+  return COMMAND_DESC[cmd] ?? "";
 }

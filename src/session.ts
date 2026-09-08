@@ -26,7 +26,9 @@ function sessionsDir(): string {
 function newId(): string {
   const t = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+  // random suffix — two Session.new() calls in the same second must not collide
+  const rnd = Math.random().toString(36).slice(2, 6);
+  return `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}${rnd}`;
 }
 
 export class Session {
