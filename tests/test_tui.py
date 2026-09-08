@@ -41,3 +41,21 @@ def test_model_switch_updates_config(isolated_home):
 def test_logout_unknown_provider_no_crash(isolated_home):
     tui = TUI(load_config(), ProviderRegistry(), plain=True)
     assert tui.handle_slash("/logout nonexistent") is True
+
+
+def test_build_agent_unknown_provider_returns_none_not_exit(isolated_home):
+    """Regression: unknown provider used to raise SystemExit that the run loop
+    swallowed silently — the user saw no error at all."""
+    cfg = load_config()
+    cfg.model = "notreal/model-x"
+    cfg.split_model()
+    tui = TUI(cfg, ProviderRegistry(cfg.endpoints), plain=True)
+    assert tui.build_agent() is None  # no SystemExit
+
+
+def test_build_agent_missing_credentials_returns_none(isolated_home):
+    cfg = load_config()
+    cfg.model = "deepseek/deepseek-chat"  # in catalog, no key stored
+    cfg.split_model()
+    tui = TUI(cfg, ProviderRegistry(cfg.endpoints), plain=True)
+    assert tui.build_agent() is None

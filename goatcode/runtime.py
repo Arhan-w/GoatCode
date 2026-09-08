@@ -13,13 +13,23 @@ from .providers import Credential, OAUTH_PROVIDERS, Provider, ProviderRegistry, 
 from . import oauth
 
 
-class AuthRequired(RuntimeError):
+class ResolveError(RuntimeError):
+    """Base for provider-resolution failures callers must surface."""
+
+
+class AuthRequired(ResolveError):
     def __init__(self, provider_id: str) -> None:
         super().__init__(
             f"provider '{provider_id}' needs credentials.\n"
             f"  API key:  set the env var or run:  goat auth {provider_id} --key <KEY>\n"
             f"  OAuth:    goat auth {provider_id} --oauth   (if listed by: goat auth --list-oauth)"
         )
+        self.provider_id = provider_id
+
+
+class UnknownProvider(ResolveError):
+    def __init__(self, provider_id: str) -> None:
+        super().__init__(f"unknown provider '{provider_id}' — see: goat providers")
         self.provider_id = provider_id
 
 
@@ -54,7 +64,7 @@ def _headers_for(provider_id: str, cred: Credential) -> dict[str, str]:
 def resolve(cfg: Config, registry: ProviderRegistry) -> Resolved:
     provider = registry.get(cfg.provider)
     if provider is None:
-        raise SystemExit(f"goat: unknown provider '{cfg.provider}' — see: goat providers")
+        raise UnknownProvider(cfg.provider)
     cred = registry.resolve_credential(provider.id)
     if cred is None:
         raise AuthRequired(provider.id)

@@ -20,7 +20,7 @@ from rich.text import Text
 from .agent import Agent
 from .config import Config, app_dir, save_config
 from .providers import Credential, OAUTH_PROVIDERS, ProviderRegistry
-from .runtime import AuthRequired, resolve
+from .runtime import ResolveError, resolve
 from .session import Session, list_sessions
 from .tools import ToolKit
 from . import oauth
@@ -50,12 +50,15 @@ class TUI:
 
     # ---------- setup ----------
 
-    def build_agent(self) -> Agent:
+    def build_agent(self) -> Agent | None:
+        """Resolve provider/credentials. Returns None (after printing the
+        error) when the model can't be used — the loop keeps running so the
+        user can /model to something valid."""
         try:
             resolved = resolve(self.cfg, self.registry)
-        except AuthRequired as exc:
+        except ResolveError as exc:
             self.console.print(f"[red]{exc}[/red]")
-            raise SystemExit(2) from None
+            return None
         self.session.model = resolved.provider.id + "/" + self.cfg.model_id
         tools = ToolKit(Path(self.session.cwd), permission=self._confirm,
                         auto_approve=self.cfg.auto_approve)
@@ -256,10 +259,8 @@ class TUI:
                     return
                 continue
             if self.agent is None:
-                try:
-                    self.agent = self.build_agent()
-                except SystemExit:
-                    continue
+                if self.build_agent() is None:
+                    continue  # error already printed; let the user fix the model
             await self._run_turn(line)
 
     async def _run_turn(self, text: str) -> None:

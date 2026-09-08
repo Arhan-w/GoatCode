@@ -130,14 +130,14 @@ def cmd_print(args: argparse.Namespace, cfg: Config) -> int:
     import asyncio
 
     from .agent import Agent
-    from .runtime import AuthRequired, resolve
+    from .runtime import ResolveError, resolve
     from .session import Session
     from .tools import ToolKit
 
     registry = _registry(cfg)
     try:
         resolved = resolve(cfg, registry)
-    except AuthRequired as exc:
+    except ResolveError as exc:
         print(exc, file=sys.stderr)
         return 2
     session = Session.new(str(Path.cwd()), cfg.model)
