@@ -662,11 +662,109 @@ describe("compact command", () => {
       cfg: { model: "mock/m", maxTokens: 8192, autoApprove: false } as any,
       setCfg: () => {}, registry: null as any, setSession: () => {}, saveCfg: () => {},
       exit: () => {}, mcp: null, skills: [], undoTurn: () => 0, backgroundTasks: () => [],
-      setMode: () => {}, runTurn: async () => {},
+      setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub",
     };
     expect(runSlash("/compact", io)).toBe(true);
-    expect(s.compactedFrom).toBeGreaterThan(0);
-    expect(s.messages[s.compactedFrom].role).not.toBe("tool");
-    expect(s.context().length).toBeLessThan(20);
+    expect(s.compactedFrom).toBe(0); // delegated — the stub doesn't mutate
+  });
+
+  test("compactNow summarizes with the model and stores the digest", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    let summaryAsked = false;
+    const client = {
+      async *streamChat(msgs: any[]) {
+        summaryAsked = String(msgs[0]?.content).includes("continuation summary");
+        yield { textDelta: "User asked X. Edited a.ts. Tests pass." };
+      },
+    } as any;
+    const session = Session.new(home, "mock/m");
+    for (let i = 0; i < 20; i++)
+      session.messages.push({ role: i % 7 === 6 ? "tool" : "user", content: `m${i} `.repeat(20), ...(i % 7 === 6 ? { toolCallId: `t${i}`, name: "read" } : {}) });
+    const agent = new Agent({
+      client, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 50, temperature: null, maxSteps: 1,
+    });
+    const r = await agent.compactNow();
+    expect(summaryAsked).toBe(true);
+    expect(r.model).toBe(true);
+    expect(r.folded).toBeGreaterThan(0);
+    expect(session.digest).toContain("Edited a.ts");
+    expect(session.messages[session.compactedFrom].role).not.toBe("tool");
+    // context after compaction is smaller than full history
+    expect(session.context().length).toBeLessThan(20);
+    // second call with nothing to fold
+    const again = await agent.compactNow();
+    expect(again.folded).toBe(0);
+  });
+
+  test("compactNow falls back to the digest when the model errors", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const client = {
+      async *streamChat() { throw new Error("HTTP 500: boom"); },
+    } as any;
+    const session = Session.new(home, "mock/m");
+    for (let i = 0; i < 20; i++) session.messages.push({ role: "user", content: `plain msg ${i}` });
+    const agent = new Agent({
+      client, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 50, temperature: null, maxSteps: 1,
+    });
+    const r = await agent.compactNow();
+    expect(r.model).toBe(false);
+    expect(r.folded).toBeGreaterThan(0);
+    expect(session.digest).toContain("Summary of");
+  });
+});
+
+// ---------- todo / plan ----------
+describe("todo plan", () => {
+  test("todo tool stores full list and plan() returns copies", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-todo-"));
+    const tk = new ToolKit(root, { autoApprove: true });
+    const r = await tk.dispatch("todo", {
+      todos: [
+        { content: "Write tests", activeForm: "Writing tests", status: "completed" },
+        { content: "Fix bug", activeForm: "Fixing bug", status: "in_progress" },
+        { content: "Ship", activeForm: "Shipping", status: "pending" },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    expect(r.output).toContain("1/3 completed");
+    const plan = tk.plan();
+    expect(plan.length).toBe(3);
+    expect(plan[1].status).toBe("in_progress");
+    // replacement semantics: second call overwrites
+    await tk.dispatch("todo", { todos: [{ content: "Only one", activeForm: "Only oneing", status: "in_progress" }] });
+    expect(tk.plan().length).toBe(1);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("agent emits todo event after the tool runs", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    let turn = 0;
+    const client = {
+      async *streamChat() {
+        turn++;
+        if (turn === 1)
+          yield { toolCalls: [{ id: "c1", name: "todo", arguments: { todos: [{ content: "Step 1", activeForm: "Stepping", status: "in_progress" }] } }] };
+        else yield { textDelta: "planned" };
+      },
+    } as any;
+    const agent = new Agent({
+      client, session: Session.new(home, "mock/m"), tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 4,
+    });
+    const todoEvents: any[] = [];
+    for await (const ev of agent.runTurn("plan it"))
+      if (ev.kind === "todo") todoEvents.push(ev.todos);
+    expect(todoEvents.length).toBe(1);
+    expect(todoEvents[0][0].content).toBe("Step 1");
+    expect(todoEvents[0][0].activeForm).toBe("Stepping");
   });
 });

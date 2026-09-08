@@ -84,6 +84,9 @@ goat -c    # resume the most recent session
 Claude Code's interaction model, GoatCode's engine:
 
 - **❯ prompt box** with rounded border, placeholder, ↑↓ history
+- **live plan panel** — the agent's todo list pinned under the prompt:
+  `▸ Running tests` while in progress, `○` pending, `✔` struck through
+  (same content/activeForm schema as Claude Code's TodoWrite)
 - **live spinner** — random verb (`Reticulating… 4s · 212 tok  esc to interrupt`)
   over streaming markdown
 - **● tool / ⎿ result** lines, colored by outcome
@@ -105,9 +108,11 @@ Claude Code's interaction model, GoatCode's engine:
 | `/tasks` | background bash jobs started with `bash background:true` |
 | `/cost` `/context` `/doctor` `/init` `/review` | diagnostics |
 
-**`/compact` is real** — it folds older messages into a deterministic digest
-and keeps the tail, so long sessions stay inside the window without an
-extra API call.
+**`/compact` is real** — it asks the model for a dense continuation
+summary of your old context (goals, decisions, files touched, open
+threads), stores it in the session, and keeps the tail. If the model call
+fails it falls back to the free deterministic digest — compaction never
+blocks. `Ctrl+C` twice to exit; one press warns first.
 
 **Plan mode is enforced, not decorative** — in `⏸ plan`, every mutating tool
 (write/edit/bash) is denied at dispatch with instructions to leave the mode.
@@ -224,14 +229,14 @@ Tokens live in `~/.goatcode/credentials.json` and auto-refresh before expiry.
 |---|---|
 | Cold start (`goat --version`) | **~0.6 s** (binary) |
 | Binary | single file, no runtime install |
-| Tests | 40 bun tests + live e2e (providers, MCP, skills, plugins, agent loop, undo, retry, timeout) |
+| Tests | 44 bun tests + live e2e under a real ConPTY (providers, MCP, skills, plugins, agent loop, undo, retry, timeout, plan panel) |
 | Type check | `tsc --noEmit` clean, strict |
 
 ## Development
 
 ```bash
 bun install
-bun test                    # 40 tests, ~6s, no network
+bun test                    # 44 tests, ~6s, no network
 bunx tsc --noEmit           # strict type check
 bun run src/index.ts        # dev TUI
 bun build src/index.ts --compile --outfile dist/goat   # ship it

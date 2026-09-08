@@ -24,6 +24,7 @@ import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import { buildExtraSystem } from "./context.ts";
 import { loadMcpFromConfig, type McpClient } from "./mcp/client.ts";
 import { ToolKit } from "./tools.ts";
+import type { Todo } from "./tools.ts";
 
 // ---------- theme (goat violet) ----------
 export const ACCENT = "#a855f7";
@@ -128,6 +129,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [completions, setCompletions] = useState<string[]>([]);
   const [compSel, setCompSel] = useState(0);
   const [thinkLine, setThinkLine] = useState("");
+  const [todos, setTodos] = useState<Todo[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const lastCtrlC = useRef(0);
@@ -272,6 +274,9 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
             if (mm) setTokens(Number(mm[2]));
             break;
           }
+          case "todo":
+            setTodos(ev.todos);
+            break;
           case "retry":
             flush();
             push(
@@ -374,6 +379,13 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         backgroundTasks: () => toolsRef.current?.backgroundTasks() ?? [],
         setMode: (m) => { setMode(m); setCfg((c) => ({ ...c, autoApprove: m === "bypass" })); },
         runTurn,
+        compactNow: async () => {
+          const agent = await buildAgent();
+          if (!agent) return "compact failed — no usable client";
+          const r = await agent.compactNow();
+          if (r.folded === 0) return "already compacted — nothing older to fold";
+          return `summarized ${r.folded} older messages${r.model ? " with the model" : " (deterministic digest fallback)"} — context rebuilt`;
+        },
       };
       runSlash(text, io);
       return;
@@ -484,6 +496,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
 
       {perm && <PermDialog req={perm} sel={permSel} />}
 
+      {todos.length > 0 && <PlanPanel todos={todos} />}
+
       <Box flexDirection="column">
         <Box borderStyle="round" borderColor={thinking ? BORDER : ACCENT} paddingLeft={1}>
           <Text color={ACCENT} bold>❯ </Text>
@@ -523,6 +537,25 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
 }
 
 // ---------- sub-components ----------
+
+function PlanPanel({ todos }: { todos: Todo[] }) {
+  const done = todos.filter((t) => t.status === "completed").length;
+  return (
+    <Box flexDirection="column" paddingLeft={1} marginBottom={0}>
+      <Text dimColor color={DIM}>  Plan {done}/{todos.length}</Text>
+      {todos.slice(-8).map((t, i) => (
+        <Text key={`${t.content}-${i}`}>
+          <Text color={t.status === "completed" ? GREEN : t.status === "in_progress" ? ACCENT : DIM}>
+            {"  "}{t.status === "completed" ? "✔" : t.status === "in_progress" ? "▸" : "○"}{" "}
+          </Text>
+          <Text color={t.status === "completed" ? DIM : undefined} strikethrough={t.status === "completed"}>
+            {t.status === "in_progress" ? t.activeForm : t.content}
+          </Text>
+        </Text>
+      ))}
+    </Box>
+  );
+}
 
 function Welcome({ cfg, cwd }: { cfg: GoatConfig; cwd: string }) {
   const logo = [

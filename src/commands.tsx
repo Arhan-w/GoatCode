@@ -37,6 +37,8 @@ export interface SlashIO {
   backgroundTasks(): { id: string; cmd: string; status: string; started: number }[];
   setMode(mode: "default" | "acceptEdits" | "plan" | "bypass"): void;
   runTurn(text: string): Promise<void>;
+  /** Summarize old context with the model; resolves to a status line. */
+  compactNow(): Promise<string>;
 }
 
 export function runSlash(line: string, io: SlashIO): boolean {
@@ -156,15 +158,8 @@ export function runSlash(line: string, io: SlashIO): boolean {
         io.push(<Text dimColor color="#8a8a8a">  nothing to compact yet — context is still small</Text>);
         return true;
       }
-      let cut = Math.max(0, msgs.length - 8);
-      while (cut < msgs.length && msgs[cut]?.role === "tool") cut++;
-      if (cut <= io.session.compactedFrom) {
-        io.push(<Text dimColor color="#8a8a8a">  already compacted — {io.session.compactedFrom} older messages are folded into the digest</Text>);
-        return true;
-      }
-      io.session.compactedFrom = cut;
-      io.session.save();
-      io.push(<Text color="#4ade80">✓ folded {cut} older messages into the summary digest — the next request uses the tail</Text>);
+      io.push(<Text dimColor color="#8a8a8a">  ✻ summarizing context…</Text>);
+      void io.compactNow().then((status) => io.push(<Text color="#4ade80">✓ {status}</Text>));
       return true;
     }
 

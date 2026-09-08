@@ -6,7 +6,7 @@
 import { buildSystemPrompt } from "./system-prompt.ts";
 import { isRetryableLLMError, type ChatClient, type Message, type StreamEvent, type ToolCall, type ToolSpec } from "./llm.ts";
 import { Session, summarize } from "./session.ts";
-import { ToolKit, type PermissionFn } from "./tools.ts";
+import { ToolKit, type PermissionFn, type Todo } from "./tools.ts";
 
 export const COMPACT_TRIGGER_CHARS = 220_000;
 /** Attempt budget for transient LLM failures (429/5xx/network) within one step. */
@@ -27,6 +27,7 @@ export type AgentEvent =
   | { kind: "usage"; text: string; usage?: { prompt: number; completion: number } }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
   | { kind: "retry"; attempt: number; waitMs: number; reason: string }
+  | { kind: "todo"; todos: Todo[] }
   | { kind: "error"; text: string }
   | { kind: "done" };
 
@@ -76,8 +77,11 @@ export class Agent {
     let sys = buildSystemPrompt(this.session.cwd);
     if (this.extraSystem) sys += "\n\n" + this.extraSystem;
     const msgs: Message[] = [{ role: "system", content: sys }];
-    if (this.session.compactedFrom > 0)
-      msgs.push({ role: "system", content: summarize(this.session.messages.slice(0, this.session.compactedFrom)) });
+    if (this.session.compactedFrom > 0) {
+      const digest = this.session.digest ||
+        summarize(this.session.messages.slice(0, this.session.compactedFrom));
+      msgs.push({ role: "system", content: digest });
+    }
     msgs.push(...ctx);
     return msgs;
   }
@@ -117,6 +121,8 @@ export class Agent {
           toolCallId: call.id, name: call.name,
         });
         yield { kind: "tool_end", tool: call.name, result: result.output.slice(0, 2000), ok: result.ok };
+        if (call.name === "todo" && result.ok)
+          yield { kind: "todo", todos: this.tools.plan() };
       }
       this.maybeCompact();
       this.session.save();
@@ -201,6 +207,50 @@ export class Agent {
       while (cut < this.session.messages.length && this.session.messages[cut]?.role === "tool") cut++;
       if (cut < this.session.messages.length) this.session.compactedFrom = cut;
     }
+  }
+
+  /**
+   * Model-written compaction (Claude Code /compact semantics): ask the model
+   * to summarize the fold zone, store it as the digest, move the cut. On any
+   * failure fall back to the deterministic digest — compaction never blocks.
+   * Returns { folded, summary, model }.
+   */
+  async compactNow(signal?: AbortSignal): Promise<{ folded: number; summary: string; model: boolean }> {
+    const msgs = this.session.messages;
+    const keep = Math.max(8, Math.floor(msgs.length / 3));
+    let cut = Math.max(0, msgs.length - keep);
+    while (cut < msgs.length && msgs[cut]?.role === "tool") cut++;
+    if (cut <= this.session.compactedFrom)
+      return { folded: 0, summary: "", model: false };
+    const fold = msgs.slice(this.session.compactedFrom, cut);
+    const transcript = fold
+      .map((m) => `${m.role}${m.toolCalls?.length ? `(${m.toolCalls.map((tc) => tc.name).join(",")})` : ""}: ${m.content.slice(0, 700)}`)
+      .join("\n")
+      .slice(0, 120_000);
+    let summary = "";
+    let usedModel = false;
+    try {
+      let acc = "";
+      for await (const ev of this.client.streamChat(
+        [
+          { role: "system", content: "You compress coding-agent transcripts. Write a dense continuation summary of the transcript below: user goals and constraints, decisions made, files created/edited (paths), current state, and open threads. Under 500 words. Plain text, no preamble." },
+          { role: "user", content: transcript },
+        ],
+        [],
+        { model: modelId(this.session.model), maxTokens: 1024, temperature: 0.2, signal },
+      )) {
+        if (ev.textDelta) acc += ev.textDelta;
+        if (ev.error) throw new Error(ev.error);
+      }
+      if (acc.trim()) { summary = acc.trim(); usedModel = true; }
+    } catch { /* fall through to digest */ }
+    if (!summary) summary = summarize(fold);
+    this.session.digest = this.session.digest
+      ? this.session.digest + "\n\n" + summary
+      : summary;
+    this.session.compactedFrom = cut;
+    this.session.save();
+    return { folded: cut, summary, model: usedModel };
   }
 }
 

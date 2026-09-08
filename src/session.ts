@@ -15,6 +15,8 @@ export interface SessionData {
   usage: { in: number; out: number };
   messages: Message[];
   compactedFrom: number;
+  /** Model-written (or digest-fallback) summary of everything before compactedFrom. */
+  digest: string;
 }
 
 function sessionsDir(): string {
@@ -40,6 +42,7 @@ export class Session {
   messages: Message[] = [];
   compactedFrom = 0;
   usage = { in: 0, out: 0 };
+  digest = "";
 
   constructor(init: Partial<SessionData> & { id: string; cwd: string; model: string }) {
     this.id = init.id;
@@ -50,6 +53,7 @@ export class Session {
     this.messages = init.messages ?? [];
     this.compactedFrom = init.compactedFrom ?? 0;
     this.usage = init.usage ?? { in: 0, out: 0 };
+    this.digest = init.digest ?? "";
   }
 
   static new(cwd: string, model: string): Session {
@@ -75,7 +79,7 @@ export class Session {
       JSON.stringify({
         meta: true, id: this.id, cwd: this.cwd, model: this.model,
         title: this.title, createdAt: this.createdAt,
-        compactedFrom: this.compactedFrom, usage: this.usage,
+        compactedFrom: this.compactedFrom, usage: this.usage, digest: this.digest,
       }),
       ...this.messages.map((m) => JSON.stringify(m)),
     ];
@@ -92,6 +96,7 @@ export class Session {
         this.cwd = obj.cwd; this.model = obj.model; this.title = obj.title ?? "";
         this.createdAt = obj.createdAt; this.compactedFrom = obj.compactedFrom ?? 0;
         this.usage = obj.usage ?? { in: 0, out: 0 };
+        this.digest = obj.digest ?? "";
       } else {
         msgs.push(obj as Message);
       }

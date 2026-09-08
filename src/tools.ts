@@ -40,6 +40,15 @@ export interface ExternalTool {
  *  mutation created the file, so undo deletes it instead of restoring. */
 export type SnapRecord = { path: string; existed: boolean; before: string; after: string };
 
+/** Agent-maintained plan step (Claude Code TodoWrite analogue, same schema). */
+export interface Todo {
+  /** Imperative form: "Run tests". */
+  content: string;
+  /** Present continuous shown while running: "Running tests". */
+  activeForm: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
 /** glob (**, *, ?) -> anchored regex */
 export function fnmatch(rel: string, pattern: string): boolean {
   let rx = "";
@@ -84,6 +93,7 @@ export class ToolKit {
 
   private snaps: SnapRecord[] = [];
   private bg = new Map<string, BgTask>();
+  private todos: Todo[] = [];
 
   constructor(root: string, opts: { permission?: PermissionFn; autoApprove?: boolean; readonly?: boolean } = {}) {
     this.root = resolve(root);
@@ -329,6 +339,28 @@ export class ToolKit {
     };
   }
 
+  /** Current plan (for UI rendering). */
+  plan(): Todo[] {
+    return this.todos.map((t) => ({ ...t }));
+  }
+
+  tool_todo(args: Record<string, any>): ToolResult {
+    const raw = Array.isArray(args.todos) ? args.todos : [];
+    const todos: Todo[] = [];
+    for (const t of raw.slice(0, 64)) {
+      if (!t || typeof t !== "object") continue;
+      const content = String(t.content ?? "").slice(0, 500);
+      if (!content) continue;
+      const activeForm = String(t.activeForm ?? t.active_form ?? content).slice(0, 500);
+      const s = t.status === "completed" || t.status === "in_progress" ? t.status : "pending";
+      todos.push({ content, activeForm, status: s });
+    }
+    if (!todos.length) return { ok: false, output: "todos must be a non-empty array of {content, activeForm, status}" };
+    this.todos = todos;
+    const done = todos.filter((t) => t.status === "completed").length;
+    return { ok: true, output: `plan updated: ${done}/${todos.length} completed` };
+  }
+
   tool_glob(args: Record<string, any>): ToolResult {
     const pattern = String(args.pattern ?? "");
     const matches: string[] = [];
@@ -418,11 +450,16 @@ function builtinSpecs(): ToolSpec[] {
       parameters: { type: "object", properties: {} } },
     { name: "glob", description: "Find files by pattern, e.g. 'src/**/*.ts'.",
       parameters: { type: "object", properties: { pattern: { type: "string" } }, required: ["pattern"] } },
-    { name: "grep", description: "Search file contents by regex. Returns path:line:text.",
+    { name: "todo", description:
+      "Create and manage a structured task list for the current work. Use proactively for multi-step tasks (3+ steps); update statuses in real time — mark a task in_progress BEFORE starting it and completed IMMEDIATELY after, exactly one in_progress at a time. Skip it for single trivial tasks. Do not batch completions. The list is shown live to the user.",
       parameters: { type: "object", properties: {
-        pattern: { type: "string", description: "Regex" },
-        path: { type: "string", description: "Subdirectory to search (default .)" },
-        glob: { type: "string", description: "Filename filter, e.g. '*.py'" },
-      }, required: ["pattern"] } },
+        todos: { type: "array", description: "The FULL replacement list (send the whole plan every time)", items: {
+          type: "object", properties: {
+            content: { type: "string", description: "Imperative form, e.g. 'Run tests'" },
+            activeForm: { type: "string", description: "Present continuous shown while running, e.g. 'Running tests'" },
+            status: { type: "string", enum: ["pending", "in_progress", "completed"] },
+          }, required: ["content", "activeForm", "status"] },
+        },
+      }, required: ["todos"] } },
   ];
 }
