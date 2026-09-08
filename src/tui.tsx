@@ -20,6 +20,7 @@ import { ProviderRegistry } from "./providers.ts";
 import { ResolveError, resolve } from "./runtime.ts";
 import { Session } from "./session.ts";
 import { loadSkills, loadSkillBody, type SkillDef } from "./skills/loader.ts";
+import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import { buildExtraSystem } from "./context.ts";
 import { loadMcpFromConfig, type McpClient } from "./mcp/client.ts";
 import { ToolKit } from "./tools.ts";
@@ -152,11 +153,19 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         if (m.servers.size)
           push(<Text dimColor color={DIM}>  ⚡ {m.servers.size} MCP server(s) connected</Text>);
       } catch { /* mcp optional */ }
-      setSkills(loadSkills(
+      const dirs = [
         join(appDir(), "skills"),
         join(process.cwd(), "skills"),
         join(process.cwd(), ".claude", "skills"),
-      ));
+      ];
+      const pl = loadPlugins(cfgRef.current.pluginDirs.map((d) => resolvePath(process.cwd(), d)));
+      const native = loadSkills(...dirs);
+      const fromPlugins = pluginSkills(pl);
+      if (pl.length)
+        push(<Text dimColor color={DIM}>  🔌 {pl.length} plugin(s) · {fromPlugins.length} command/skill(s)</Text>);
+      // native wins on name collision; plugins extend the palette
+      const names = new Set(native.map((s) => s.name));
+      setSkills([...native, ...fromPlugins.filter((s) => !names.has(s.name))]);
     })();
   }, [push]);
 
@@ -348,7 +357,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       const rest = text.slice(1 + name.length).trim();
       const sk = skills.find((s) => s.name === name);
       if (sk) {
-        const body = loadSkillBody(sk);
+        const body = loadSkillBody(sk).replace(/\$ARGUMENTS/g, rest).replace(/\$(\d)/g, (_, i) => rest.split(/\s+/)[Number(i) - 1] ?? "");
         void runTurn(`[skill: /${sk.name}]\n${body}\n\n${rest || "Execute this skill on the current project."}`);
         return;
       }

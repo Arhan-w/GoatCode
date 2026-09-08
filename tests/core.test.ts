@@ -299,6 +299,40 @@ describe("skills", () => {
   });
 });
 
+// ---------- pricing ----------
+describe("pricing", () => {
+  test("costUsd matches known families and returns null for unknown", async () => {
+    const { costUsd, priceFor } = await import("../src/pricing.ts");
+    expect(priceFor("anthropic/claude-sonnet-4-5")).toEqual({ in: 3, out: 15 });
+    expect(costUsd("anthropic/claude-sonnet-4-5", 1_000_000, 500_000)).toBeCloseTo(10.5);
+    expect(costUsd("deepseek/deepseek-chat", 10_000, 1_000)).toBeCloseTo(0.0037);
+    expect(costUsd("freellmapi/auto", 1000, 1000)).toBeNull();
+  });
+});
+
+// ---------- plugins ----------
+describe("plugins", () => {
+  test("plugin dirs contribute commands and skills", async () => {
+    const { loadPlugins, pluginSkills } = await import("../src/plugins/loader.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-plugin-"));
+    mkdirSync(join(root, "mypl", "commands"), { recursive: true });
+    mkdirSync(join(root, "mypl", "skills", "deploy", ""), { recursive: true });
+    writeFileSync(join(root, "mypl", "manifest.json"), JSON.stringify({ name: "mypl", version: "1.0" }));
+    writeFileSync(join(root, "mypl", "commands", "changelog.md"),
+      "---\ndescription: Summarize recent commits\n---\nList commits since $1 and write a changelog for: $ARGUMENTS\n");
+    writeFileSync(join(root, "mypl", "skills", "deploy", "SKILL.md"),
+      "---\nname: deploy\ndescription: Ship it\n---\nrun the deploy script\n");
+    const plugins = loadPlugins([join(root, "mypl")]);
+    expect(plugins.length).toBe(1);
+    const sk = pluginSkills(plugins);
+    expect(sk.map((s) => s.name).sort()).toEqual(["changelog", "deploy"]);
+    const cmd = sk.find((s) => s.name === "changelog")!;
+    expect(cmd.description).toBe("Summarize recent commits");
+    expect(cmd._body).toContain("$ARGUMENTS");
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
 // ---------- commands ----------
 describe("commands", () => {
   test("SLASH_COMMANDS covers the palette", async () => {
@@ -505,6 +539,37 @@ describe("retry", () => {
     expect(kinds).not.toContain("retry");
     expect(kinds).toContain("error");
     expect(calls).toBe(1);
+  });
+
+  test("a hung request hits the per-attempt timeout and becomes a retryable error", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    let calls = 0;
+    const client = {
+      async *streamChat(_msgs: any, _tools: any, opts: any) {
+        calls++;
+        // hang until the agent's deadline aborts us (never yields content)
+        await new Promise<void>((_, rej) => {
+          if (opts.signal?.aborted) return rej(new Error("aborted"));
+          opts.signal?.addEventListener?.("abort", () => rej(new Error("request timed out after 0.03s")));
+        });
+        yield { textDelta: "never" };
+      },
+    } as any;
+    const agent = new Agent({
+      client, session: Session.new(home, "mock/m"), tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 2, retryBaseMs: 10, requestTimeoutMs: 30,
+    });
+    const kinds: string[] = [];
+    let lastReason = "";
+    for await (const ev of agent.runTurn("hi")) {
+      kinds.push(ev.kind);
+      if (ev.kind === "retry") lastReason = ev.reason;
+    }
+    expect(calls).toBeGreaterThanOrEqual(2); // first attempt timed out, was retried
+    expect(lastReason).toContain("timed out");
+    expect(kinds).toContain("error"); // exhausted attempts
   });
 
   test("retry-after hint is respected (capped)", async () => {

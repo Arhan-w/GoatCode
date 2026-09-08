@@ -13,6 +13,11 @@ export const COMPACT_TRIGGER_CHARS = 220_000;
 export const LLM_MAX_ATTEMPTS = 4;
 export const RETRY_BASE_MS = 1_000;
 export const RETRY_MAX_MS = 20_000;
+/** Per-attempt wall clock: a provider that hangs gets cut off and retried. */
+export const REQUEST_TIMEOUT_MS = (() => {
+  const n = Number(process.env.GOAT_REQUEST_TIMEOUT);
+  return Number.isFinite(n) && n > 0 ? n * 1000 : 120_000;
+})();
 
 export type AgentEvent =
   | { kind: "text"; text: string }
@@ -37,6 +42,8 @@ export interface AgentDeps {
   /** Retry tuning (tests shrink these; production uses the exported defaults). */
   retryBaseMs?: number;
   maxAttempts?: number;
+  /** Per-attempt request deadline in ms (default REQUEST_TIMEOUT_MS). */
+  requestTimeoutMs?: number;
 }
 
 export class Agent {
@@ -49,6 +56,7 @@ export class Agent {
   extraSystem: string;
   retryBaseMs: number;
   maxAttempts: number;
+  requestTimeoutMs: number;
 
   constructor(deps: AgentDeps) {
     this.client = deps.client;
@@ -60,6 +68,7 @@ export class Agent {
     this.extraSystem = deps.extraSystem ?? "";
     this.retryBaseMs = deps.retryBaseMs ?? RETRY_BASE_MS;
     this.maxAttempts = deps.maxAttempts ?? LLM_MAX_ATTEMPTS;
+    this.requestTimeoutMs = deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   }
 
   private messages(): Message[] {
@@ -124,13 +133,24 @@ export class Agent {
   private async *streamWithRetry(signal?: AbortSignal): AsyncGenerator<AgentEvent> {
     for (let attempt = 1; ; attempt++) {
       let sawContent = false;
+      let timedOut = false;
+      // per-attempt deadline: a hung provider becomes a retryable 408, not a freeze.
+      // (manual timer, cleared in finally — AbortSignal.timeout would keep the
+      // process alive on its pending timer long after the stream ended)
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, this.requestTimeoutMs);
+      const onUserAbort = () => ctrl.abort();
+      signal?.addEventListener("abort", onUserAbort);
       try {
-        for await (const ev of this.streamOnce(signal)) {
+        for await (const ev of this.streamOnce(ctrl.signal)) {
           if (ev.kind === "text" || ev.kind === "thinking" || ev.kind === "tool_calls") sawContent = true;
           yield ev;
         }
         return;
       } catch (e: any) {
+        if (timedOut && !signal?.aborted)
+          e = new Error(`request timed out after ${Math.round(this.requestTimeoutMs / 1000)}s`);
+        if (timedOut && !signal?.aborted) (e as any).status = 408;
         const retryable = isRetryableLLMError(e) && !sawContent && attempt < this.maxAttempts && !signal?.aborted;
         if (!retryable) {
           yield { kind: "error", text: `${e?.name ?? "Error"}: ${e?.message ?? e}` };
@@ -149,6 +169,9 @@ export class Agent {
           yield { kind: "error", text: "interrupted during retry" };
           return;
         }
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onUserAbort);
       }
     }
   }

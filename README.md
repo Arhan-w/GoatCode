@@ -28,7 +28,7 @@ markdown under a live spinner, sandboxed tools with permission prompts,
 | Extensibility | — | **MCP servers** (stdio/http/sse) · **skills** (SKILL.md) · **plugins** |
 | Context | — | **@file references** · **!bash mode** · **# memory** → GOAT.md |
 | Resilience | one-shot failure | **retry w/ jittered backoff** on 429/5xx/network, `retry-after` honored, esc interrupts mid-request |
-| Engine | 60 tests | same 4 wire formats, OAuth flows, sessions, compaction — **37 TS tests + full e2e** |
+| Engine | 60 tests | same 4 wire formats, OAuth flows, sessions, compaction — **40 TS tests + full e2e** |
 
 ## Install
 
@@ -39,6 +39,9 @@ bun install
 
 # or build the standalone binary (~100 MB, zero dependencies)
 bun build src/index.ts --compile --outfile goat
+
+# or grab the latest release and put it on your PATH — one file, nothing else
+# windows:   copy goat.exe D:\bin   ·   PATH += D:\bin
 ```
 
 Prebuilt binaries: see [Releases](../../releases).
@@ -73,6 +76,7 @@ One-shot for scripts and CI:
 ```bash
 goat -p "summarize what @setup.py does" -q
 goat --auto -m freellmapi/auto -p "run the tests and fix failures"
+goat -c    # resume the most recent session
 ```
 
 ## The TUI
@@ -115,9 +119,16 @@ and keep working; finished jobs are announced between turns.
 
 **It survives flaky APIs** — a 429, 5xx, or dropped connection before any
 tokens stream is retried with capped exponential backoff + jitter (honoring
-the server's `retry-after`), shown inline as `↻ retrying`. Once output has
-streamed, GoatCode stops instead of retrying — no duplicated answers. Esc
-interrupts even mid-backoff.
+the server's `retry-after`), shown inline as `↻ retrying`. A provider that
+merely *hangs* gets cut off after 120 s per attempt and retried too
+(`GOAT_REQUEST_TIMEOUT` to change it). Once output has streamed, GoatCode
+stops instead of retrying — no duplicated answers. Esc interrupts even
+mid-backoff.
+
+**Knows what you spent** — `/cost` prices the session's real token counts
+against a per-family rate table (Claude, GPT, Gemini, DeepSeek, Llama,
+Mistral, Qwen…), so you see `≈ $0.42 this session (live)` instead of a
+shrug.
 
 ## MCP servers
 
@@ -162,8 +173,16 @@ User-level skills live in `~/.goatcode/skills/`. `/skills` lists everything.
 
 ## Plugins
 
-A plugin dir with `manifest.json` + `commands/` + `skills/` — list it under
-`"plugins"` in config. Same layout idea as Claude Code marketplaces.
+A plugin dir contributes `/commands/<name>.md` (frontmatter description +
+`$ARGUMENTS` body → an invokable prompt) and `/skills/<name>/SKILL.md`,
+loaded via config:
+
+```json
+{ "plugins": ["~/my-plugins/reviewer"] }
+```
+
+Plugin commands and skills land in the same `/palette` as native ones —
+`/changelog fix urgent bugs` just works. `/plugin` lists what loaded.
 
 ## Providers
 
@@ -205,14 +224,14 @@ Tokens live in `~/.goatcode/credentials.json` and auto-refresh before expiry.
 |---|---|
 | Cold start (`goat --version`) | **~0.6 s** (binary) |
 | Binary | single file, no runtime install |
-| Tests | 37 bun tests + live e2e (providers, MCP, skills, agent loop, undo, retry) |
+| Tests | 40 bun tests + live e2e (providers, MCP, skills, plugins, agent loop, undo, retry, timeout) |
 | Type check | `tsc --noEmit` clean, strict |
 
 ## Development
 
 ```bash
 bun install
-bun test                    # 37 tests, ~5s, no network
+bun test                    # 40 tests, ~6s, no network
 bunx tsc --noEmit           # strict type check
 bun run src/index.ts        # dev TUI
 bun build src/index.ts --compile --outfile dist/goat   # ship it

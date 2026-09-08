@@ -8,7 +8,9 @@ import { saveConfig, splitModel } from "./config.ts";
 import type { ProviderRegistry } from "./providers.ts";
 import { CredentialStore, OAUTH_PROVIDERS, type Credential } from "./providers.ts";
 import { Session, listSessions } from "./session.ts";
+import { costUsd, fmtUsd } from "./pricing.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
+import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import type { McpClient } from "./mcp/client.ts";
 import type { SkillDef } from "./skills/loader.ts";
 
@@ -229,14 +231,39 @@ export function runSlash(line: string, io: SlashIO): boolean {
       return true;
     }
 
-    case "/plugin":
-      io.push(<Text dimColor color="#8a8a8a">  plugins: drop manifest.json + commands/ into a dir, list it in config.json "plugins"</Text>);
+    case "/plugin": {
+      const dirs = io.cfg.pluginDirs ?? [];
+      if (!dirs.length) {
+        io.push(<Text dimColor color="#8a8a8a">  no plugin dirs — list dirs under "plugins" in config.json (commands/&lt;name&gt;.md + skills/&lt;name&gt;/SKILL.md)</Text>);
+        return true;
+      }
+      const pl = loadPlugins(dirs);
+      io.push(
+        <Box flexDirection="column">
+          {pl.map((p) => {
+            const sk = pluginSkills([p]);
+            return (
+              <Text key={p.dir}>
+                <Text color="#4ade80">✓ </Text>{p.manifest.name ?? p.dir}
+                <Text dimColor color="#8a8a8a">  {sk.length} command/skill(s): {sk.map((s) => "/" + s.name).join(" ")}</Text>
+              </Text>
+            );
+          })}
+          {pl.length < dirs.length && <Text color="#f87171">  {dirs.length - pl.length} dir(s) not found</Text>}
+        </Box>,
+      );
       return true;
+    }
 
     case "/cost": {
       const u = io.session.usage;
       const est = Math.round(io.session.messages.reduce((s, m) => s + m.content.length, 0) / 4);
-      io.push(<Text>  session: {io.session.messages.length} messages · {u.in} in / {u.out} out tokens{u.in ? ` (est context ~${est})` : ` (est ~${est}, no usage reported yet)`} · model {io.cfg.model}</Text>);
+      io.push(<Text>  session: {io.session.messages.length} messages · {u.in} in / {u.out} out tokens{u.in ? "" : " (no usage reported yet)"} · est context ~{est} · model {io.cfg.model}</Text>);
+      const cost = costUsd(io.cfg.model, u.in, u.out);
+      if (cost != null)
+        io.push(<Text color="#4ade80">  ≈ {fmtUsd(cost)} this session ({io.cfg.model} rates, live)</Text>);
+      else
+        io.push(<Text dimColor color="#8a8a8a">  no price known for {io.cfg.model} — tokens still counted above</Text>);
       return true;
     }
 

@@ -10,6 +10,7 @@
  *   goat models <provider>        list catalog models
  *   goat sessions                 list saved sessions
  *   goat resume <id>              resume a session in the TUI
+ *   goat -c | --continue          resume the most recent session
  *   goat mcp add <name> <cmd>     add an MCP server
  */
 import { run, expandFileRefs } from "./tui.tsx";
@@ -22,8 +23,22 @@ import { Agent } from "./agent.ts";
 import { ToolKit } from "./tools.ts";
 import { Session } from "./session.ts";
 import { loadSkills } from "./skills/loader.ts";
+import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import { buildExtraSystem } from "./context.ts";
 import { join } from "node:path";
+import type { GoatConfig } from "./config.ts";
+
+/** Native skills (user/project/claude dirs) extended by anything plugins provide. */
+export function allSkills(cfg: GoatConfig) {
+  const native = loadSkills(
+    join(appDir(), "skills"),
+    join(process.cwd(), "skills"),
+    join(process.cwd(), ".claude", "skills"),
+  );
+  const fromPlugins = pluginSkills(loadPlugins(cfg.pluginDirs.map((d) => join(process.cwd(), d))));
+  const names = new Set(native.map((s) => s.name));
+  return [...native, ...fromPlugins.filter((s) => !names.has(s.name))];
+}
 
 const io: LoginIO = {
   print: (s) => console.log(s),
@@ -176,6 +191,15 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // goat -c / --continue — jump straight back into the most recent session
+  if ((sub === "-c" || sub === "--continue" || has("-c") || has("--continue")) && !flag("-p") && !flag("--print")) {
+    const last = listSessions()[0];
+    if (!last) { console.log("no sessions to continue yet"); return 0; }
+    console.log(`resuming ${last.id} — ${last.title}`);
+    run(cfg, last.id);
+    return 0;
+  }
+
   // one-shot print mode
   const prompt = flag("-p") ?? flag("--print");
   if (prompt) {
@@ -195,14 +219,7 @@ async function main(): Promise<number> {
     const agent = new Agent({
       client: r.client, session, tools,
       maxTokens: cfg.maxTokens, temperature: cfg.temperature, maxSteps: cfg.maxSteps,
-      extraSystem: buildExtraSystem(
-        loadSkills(
-          join(appDir(), "skills"),
-          join(process.cwd(), "skills"),
-          join(process.cwd(), ".claude", "skills"),
-        ),
-        process.cwd(),
-      ),
+      extraSystem: buildExtraSystem(allSkills(cfg), process.cwd()),
     });
     let out = "";
     const expandedPrompt = expandFileRefs(prompt, process.cwd());
