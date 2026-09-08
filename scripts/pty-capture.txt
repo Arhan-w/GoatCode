@@ -1,105 +1,22 @@
-===== goat output (ANSI stripped) =====
+===== idle 20s: alive=True exit=None =====
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ ❯ help me build…  (/ for commands)                                                                                                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- ask before edits  (shift+tab to cycle)  ·  openrouter/deepseek-ai/deepseek-v3.2  ·  ~  ·  /help · ctrl+t tasks · /undo
+ ask before edits  (shift+tab to cycle)  ·  freellmapi/auto  ·  ~  ·  /help · ctrl+t tasks · /undo
 
  ██████╗  ██████╗  █████╗ ████████╗
 ██╔════╝ ██╔═══██╗██╔══██╗╚══██╔══╝
-██║      ██║   ██║███████║   ██║
-██║      ██║   ██║██╔══██║   ██║
-╚██████╗ ╚██████╔╝██║  ██║   ██║
+██║  ███╗██║   ██║███████║   ██║
+██║   ██║██║   ██║██╔══██║   ██║
+╚██████╔╝╚██████╔╝██║  ██║   ██║
  ╚═════╝  ╚═════╝ ╚═╝  ╚═╝   ╚═╝
 GoatCode  v2.0  ·  every provider, one terminal
-  model openrouter/deepseek-ai/deepseek-v3.2
+  model freellmapi/auto
   path  ~
   tips  /help · /providers · shift+tab cycles mode
 
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ ❯ help me build…  (/ for commands)                                                                                                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- ask before edits  (shift+tab to cycle)  ·  openrouter/deepseek-ai/deepseek-v3.2  ·  ~  ·  /help · ctrl+t tasks · /undo
-]0;npm\]0;npm exec @modelcontextprotocol/server-filesystem C:/Users/Arhan/AppData/Local/Temp/goat-e2e\
-
-[[after 6s idle: alive=True exit=None]]
-
- ██████╗  ██████╗  █████╗ ████████╗
-██╔════╝ ██╔═══██╗██╔══██╗╚══██╔══╝
-██║      ██║   ██║███████║   ██║
-██║      ██║   ██║██╔══██║   ██║
-╚██████╗ ╚██████╔╝██║  ██║   ██║
- ╚═════╝  ╚═════╝ ╚═╝  ╚═╝   ╚═╝
-GoatCode  v2.0  ·  every provider, one terminal
-  model openrouter/deepseek-ai/deepseek-v3.2
-  path  ~
-  tips  /help · /providers · shift+tab cycles mode
-
-╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ ❯ hello there                                                                                                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- ask before edits  (shift+tab to cycle)  ·  openrouter/deepseek-ai/deepseek-v3.2  ·  ~  ·  /help · ctrl+t tasks · /undo
-]0;C:\Windows\system32\cmd.exe \Secure MCP Filesystem Server running on stdio
-Client does not support MCP Roots, using allowed directories set from server args: [ 'C:\\Users\\Arhan\\AppData\\Local\\Temp\\goat-e2e' ]
-goat: MCP server '21st' connection failed: Streamable HTTP error: Error POSTing to endpoint: {"jsonrpc":"2.0","id":null,"error":{"code":-32001,"message":"Not authenticated - your API key is missing or was reset. Get a fresh key at https://21st.dev/mcp and update your MCP config (x-api-key / Bearer)."}}
- ██████╗  ██████╗  █████╗ ████████╗
-██╔════╝ ██╔═══██╗██╔══██╗╚══██╔══╝
-██║      ██║   ██║███████║   ██║
-██║      ██║   ██║██╔══██║   ██║
-╚██████╗ ╚██████╔╝██║  ██║   ██║
- ╚═════╝  ╚═════╝ ╚═╝  ╚═╝   ╚═╝
-GoatCode  v2.0  ·  every provider, one terminal
-  model openrouter/deepseek-ai/deepseek-v3.2
-  path  ~
-  tips  /help · /providers · shift+tab cycles mode
-
-╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ ❯ hello there                                                                                                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- ask before edits  (shift+tab to cycle)  ·  openrouter/deepseek-ai/deepseek-v3.2  ·  ~  ·  /help · ctrl+t tasks · /undo
- ██████╗  ██████╗  █████╗ ████████╗
-██╔════╝ ██╔═══██╗██╔══██╗╚══██╔══╝
-██║      ██║   ██║███████║   ██║
-██║      ██║   ██║██╔══██║   ██║
-╚██████╗ ╚██████╔╝██║  ██║   ██║
- ╚═════╝  ╚═════╝ ╚═╝  ╚═╝   ╚═╝
-GoatCode  v2.0  ·  every provider, one terminal
-  model openrouter/deepseek-ai/deepseek-v3.2
-  path  ~
-  tips  /help · /providers · shift+tab cycles mode
-
-  ⚡ 1 MCP server(s) connected
-╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ ❯ hello there                                                                                                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- ask before edits  (shift+tab to cycle)  ·  openrouter/deepseek-ai/deepseek-v3.2  ·  ~  ·  1 mcp · 146 skills · /help · ctrl+t tasks · /undo
-
-
-[[after prompt+8s: alive=True exit=None]]
-
- ██████╗  ██████╗  █████╗ ████████╗
-██╔════╝ ██╔═══██╗██╔══██╗╚══██╔══╝
-██║      ██║   ██║███████║   ██║
-██║      ██║   ██║██╔══██║   ██║
-╚██████╗ ╚██████╔╝██║  ██║   ██║
- ╚═════╝  ╚═════╝ ╚═╝  ╚═╝   ╚═╝
-GoatCode  v2.0  ·  every provider, one terminal
-  model openrouter/deepseek-ai/deepseek-v3.2
-  path  ~
-  tips  /help · /providers · shift+tab cycles mode
-
-  ⚡ 1 MCP server(s) connected
-  press ctrl+c again to exit · or /quit · session auto-saved
-╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ ❯ hello there                                                                                                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- ask before edits  (shift+tab to cycle)  ·  openrouter/deepseek-ai/deepseek-v3.2  ·  ~  ·  1 mcp · 146 skills · /help · ctrl+t tasks · /undo
-
-
-[[after first ctrl+c: alive=True exit=None]]
-
-
-
-[[after second ctrl+c: alive=False exit=0]]
-
-
-===== final exit status: 0
+ ask before edits  (shift+tab to cycle)  ·  freellmapi/auto  ·  ~  ·  /help · ctrl+t tasks · /undo
+]0;npm\

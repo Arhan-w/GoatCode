@@ -25,8 +25,8 @@ import { buildExtraSystem } from "./context.ts";
 import { loadMcpFromConfig, type McpClient } from "./mcp/client.ts";
 import { ToolKit } from "./tools.ts";
 
-// ---------- theme (claude orange → goat amber) ----------
-export const ACCENT = "#d97706";
+// ---------- theme (goat violet) ----------
+export const ACCENT = "#a855f7";
 const DIM = "#8a8a8a";
 const GREEN = "#4ade80";
 const RED = "#f87171";
@@ -528,9 +528,9 @@ function Welcome({ cfg, cwd }: { cfg: GoatConfig; cwd: string }) {
   const logo = [
     " ██████╗  ██████╗  █████╗ ████████╗",
     "██╔════╝ ██╔═══██╗██╔══██╗╚══██╔══╝",
-    "██║      ██║   ██║███████║   ██║",
-    "██║      ██║   ██║██╔══██║   ██║",
-    "╚██████╗ ╚██████╔╝██║  ██║   ██║",
+    "██║  ███╗██║   ██║███████║   ██║",
+    "██║   ██║██║   ██║██╔══██║   ██║",
+    "╚██████╔╝╚██████╔╝██║  ██║   ██║",
     " ╚═════╝  ╚═════╝ ╚═╝  ╚═╝   ╚═╝",
   ];
   return (

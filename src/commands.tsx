@@ -58,7 +58,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
 
     case "/model": {
       if (!arg) {
-        io.push(<Text>current model: <Text color="#d97706">{io.cfg.model}</Text></Text>);
+        io.push(<Text>current model: <Text color="#a855f7">{io.cfg.model}</Text></Text>);
         return true;
       }
       const next = { ...io.cfg, model: arg };
@@ -174,7 +174,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
         <Box flexDirection="column">
           {rows.slice(0, 20).map((r) => (
             <Text key={r.id}>
-              <Text color="#d97706">{r.id}</Text>  {r.model.padEnd(34)} {r.title.slice(0, 52)}
+              <Text color="#a855f7">{r.id}</Text>  {r.model.padEnd(34)} {r.title.slice(0, 52)}
             </Text>
           ))}
           {rows.length === 0 && <Text dimColor color="#8a8a8a">  (no saved sessions)</Text>}
@@ -222,7 +222,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
         <Box flexDirection="column">
           {io.skills.map((sk) => (
             <Text key={sk.name}>
-              <Text color="#d97706">/{sk.name}</Text>
+              <Text color="#a855f7">/{sk.name}</Text>
               <Text dimColor color="#8a8a8a">  {sk.description}</Text>
             </Text>
           ))}
@@ -314,7 +314,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
         <Box flexDirection="column">
           {rows.map((t) => (
             <Text key={t.id}>
-              <Text color="#d97706">{t.id.padEnd(24)}</Text>
+              <Text color="#a855f7">{t.id.padEnd(24)}</Text>
               <Text color={t.status === "running" ? "#facc15" : t.status.startsWith("exit") ? "#f87171" : "#4ade80"}>
                 {t.status === "running" ? "● running" : "✓ done"}
               </Text>
@@ -387,7 +387,7 @@ function HelpList() {
   return (
     <Box flexDirection="column">
       {SLASH_COMMANDS.map((c) => (
-        <Text key={c}><Text color="#d97706">{c.padEnd(14)}</Text><Text dimColor color="#8a8a8a"> {descOf(c)}</Text></Text>
+        <Text key={c}><Text color="#a855f7">{c.padEnd(14)}</Text><Text dimColor color="#8a8a8a"> {descOf(c)}</Text></Text>
       ))}
     </Box>
   );
