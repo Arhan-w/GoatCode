@@ -90,7 +90,7 @@ class TUI:
         if self._prompt_session is None:
             self._prompt_session = PromptSession(
                 history=FileHistory(app_dir() / "history.txt"),
-                completer=WordCompleter(SLASH_COMMANDS, sentence_start=True),
+                completer=WordCompleter(SLASH_COMMANDS, sentence=True),
                 multiline=False,
             )
         return self._prompt_session
@@ -195,8 +195,11 @@ class TUI:
             return
         pid = rest[0]
         if "--key" in rest:
-            key = rest[rest.index("--key") + 1]
-            self.registry.store.put(pid, Credential(kind="api_key", api_key=key))
+            idx = rest.index("--key") + 1
+            if idx >= len(rest):
+                self.console.print("[red]usage: /auth <provider> --key <KEY>[/red]")
+                return
+            self.registry.store.put(pid, Credential(kind="api_key", api_key=rest[idx]))
             self.console.print(f"[green]stored key for {pid}[/green]")
             self.agent = None
         elif "--oauth" in rest:
