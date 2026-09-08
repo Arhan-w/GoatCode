@@ -187,7 +187,7 @@ async function main(): Promise<number> {
   }
 
   if (sub === "resume") {
-    run(cfg, argv[1]);
+    await run(cfg, argv[1]);
     return 0;
   }
 
@@ -196,7 +196,7 @@ async function main(): Promise<number> {
     const last = listSessions()[0];
     if (!last) { console.log("no sessions to continue yet"); return 0; }
     console.log(`resuming ${last.id} — ${last.title}`);
-    run(cfg, last.id);
+    await run(cfg, last.id);
     return 0;
   }
 
@@ -234,8 +234,8 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  // interactive TUI
-  run(cfg);
+  // interactive TUI — await so the process lives until the app exits
+  await run(cfg);
   return 0;
 }
 

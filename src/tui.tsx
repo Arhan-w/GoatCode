@@ -91,12 +91,13 @@ interface PermRequest {
   resolve: (ok: boolean) => void;
 }
 
-export function run(cfg: GoatConfig = loadConfig(), resume?: string) {
+/** Renders the TUI and RESOLVES ONLY WHEN THE APP EXITS. Callers must await. */
+export async function run(cfg: GoatConfig = loadConfig(), resume?: string): Promise<void> {
   const { waitUntilExit } = render(
     <App initialCfg={cfg} resume={resume} />,
     { stdin: process.stdin, stdout: process.stdout, exitOnCtrlC: false },
   );
-  return waitUntilExit();
+  await waitUntilExit();
 }
 
 function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }) {
@@ -129,6 +130,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [thinkLine, setThinkLine] = useState("");
 
   const abortRef = useRef<AbortController | null>(null);
+  const lastCtrlC = useRef(0);
   const lineKey = useRef(0);
   const toolsRef = useRef<ToolKit | null>(null);
   const notifiedBg = useRef<Set<string>>(new Set());
@@ -403,8 +405,12 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     if (k.ctrl && ch === "c") {
-      if (thinking) { abortRef.current?.abort(); push(<Text color={RED}>⚠ interrupted</Text>); }
-      else exit();
+      if (thinking) { abortRef.current?.abort(); push(<Text color={RED}>⚠ interrupted</Text>); return; }
+      // Claude Code semantics: one Ctrl+C warns, a second within 2s exits
+      const now = Date.now();
+      if (now - lastCtrlC.current < 2000) { exit(); return; }
+      lastCtrlC.current = now;
+      push(<Text dimColor color={DIM}>  press ctrl+c again to exit · or /quit · session auto-saved</Text>);
       return;
     }
     if (k.ctrl && ch === "d") { exit(); return; }

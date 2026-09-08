@@ -1,0 +1,12 @@
+--- send 'hi' @ 02:01:44
+raw="hi"
+input="hi" return=false escape=false ctrl=false
+--- send CR (real Enter) @ 02:01:46
+raw="\r"
+input="\r" return=true escape=false ctrl=false
+--- send LF @ 02:01:47
+raw="\n"
+input="\n" return=false escape=false ctrl=false
+--- send ESC @ 02:01:49
+raw="\u001b"
+input="" return=false escape=true ctrl=false
