@@ -6,3 +6,4 @@ goatcode.local.json
 scripts/input-log.txt
 scripts/pty-capture.txt
 scripts/pty-turn.txt
+scripts/pty-plan.txt
