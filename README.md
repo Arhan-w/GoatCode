@@ -1,107 +1,188 @@
+<div align="center">
+
 # 🐐 GoatCode
 
 **Every provider. One terminal. Built for machines with 4 GB of RAM.**
 
-GoatCode is an agentic coding CLI — it reads your codebase, edits files, runs
-commands, and streams answers, talking to **180+ LLM providers** through one
-interface. Log in with an API key **or** a subscription (Claude Pro/Max,
-ChatGPT, Gemini, GitHub Copilot, Kimi, Grok) via browser OAuth — GoatCode
-converts the web login into a working API credential and refreshes it for you.
+An agentic coding CLI that reads your codebase, edits files, runs commands,
+and streams answers — talking to **183 providers** through one interface.
+Authenticate with an API key *or* an existing subscription (Claude Pro/Max,
+ChatGPT, Gemini, GitHub Copilot, Kimi, Grok): GoatCode turns the browser login
+into a working API credential and refreshes it for you.
 
-```
-goat > refactor the auth module to use the new token store
-● grep  "def login"
-● read  src/auth.py
-● edit  src/auth.py
-goat  Done — login() now delegates to TokenStore. Verify with: pytest tests/auth
-```
+![GoatCode demo](docs/assets/demo.gif)
 
-## Why
+[Install](#install) · [Quick start](#quick-start) · [Providers](#providers) ·
+[OAuth](#subscription-oauth) · [TUI](#the-tui) · [Config](#configuration)
 
-- **Provider-agnostic.** One `provider/model` string switches between OpenAI,
-  Anthropic, DeepSeek, Groq, OpenRouter, Ollama, and 175 more — no code changes.
-- **Subscriptions, not just keys.** `goat auth claude --oauth` (or codex,
-  gemini, github-copilot, kimi, grok) opens a browser, and your existing plan
-  becomes an API credential. Tokens auto-refresh.
-- **Custom endpoints.** Any OpenAI- or Anthropic-compatible URL (LM Studio,
-  vLLM, a proxy, a company gateway) is one command away.
-- **Low-end friendly.** No alt-screen redraw loop, no Electron, no Node.
-  A scrollback-native streaming TUI — full import footprint measured at
-  ~41 MB RSS, runs comfortably on 4 GB machines. `--plain` for SSH and
-  dumb terminals.
-- **Safe by default.** File writes, edits, and shell commands ask for approval
-  unless you opt into `--auto`. File tools are sandboxed to the project root;
-  bash runs with your user permissions — `--auto` trusts the model with your
-  shell, so use it only in throwaway checkouts.
+</div>
+
+---
+
+## The problem
+
+Coding agents lock you into one vendor, one billing account, one fat runtime.
+GoatCode is the opposite bet:
+
+| | GoatCode |
+|---|---|
+| **Providers** | 183 built in — OpenAI, Anthropic, DeepSeek, Groq, OpenRouter, Ollama, and 177 more, plus any custom endpoint |
+| **Auth** | API keys *and* subscription OAuth (Claude, ChatGPT, Gemini, Copilot, Kimi, Grok) with auto-refresh |
+| **Footprint** | ~41 MB import, no Electron, no Node, no database — three Python dependencies |
+| **Safety** | Writes/edits/bash ask for approval; file tools sandboxed to the project root |
+| **Sessions** | JSONL transcripts, resume any session, context compaction that survives tool calls |
+
+## Demo
+
+A real session — the agent reads a file, calls the `read` tool, and answers:
+
+![GoatCode session](docs/assets/demo.png)
+
+The GIF above is the same session, typed out. Both are rendered from actual
+terminal output (see [`docs/`](docs/)) — not staged screenshots.
 
 ## Install
 
 Requires Python 3.10+.
 
 ```bash
-pip install goatcode        # or: pipx install goatcode
-```
-
-From source:
-
-```bash
+# from source (PyPI publish pending)
 git clone https://github.com/Arhan-w/GoatCode && cd GoatCode
-pip install -e .
+pip install -e ".[dev]"        # or: pip install .
 ```
+
+Once installed, the `goat` command is on your PATH.
 
 ## Quick start
 
-```bash
-# 1. Authenticate — pick one:
-goat auth openai --key sk-...                      # API key
-goat auth claude --oauth                           # Claude Pro/Max subscription
-goat auth github-copilot --oauth                   # device flow, no browser redirect needed
-goat endpoint add local --base-url http://localhost:1234/v1 \
-    --format openai --api-key none --models qwen2.5  # LM Studio / vLLM / anything
+```console
+$ goat auth anthropic --key sk-ant-...          # store an API key
+stored API key for anthropic
 
-# 2. Run:
-goat                                               # interactive TUI
-goat -m openrouter/deepseek-ai/deepseek-v3.2       # pick a model
-goat -p "what does setup.py do?"                   # one-shot, scriptable
-goat --auto -p "run the tests and fix failures"    # unattended
+$ goat                                           # launch the TUI
+  ▄▄▄   ▄▄▄  ▄▄▄  ▄▄▄  ▄▄▄
+  █  █  █    █  █ █  █ █
+  █  █  █▄▄  █▄▄  █▄▄  ▀▀▀█
+        GoatCode — every provider, one terminal
+
+model: anthropic/claude-sonnet-4-5   cwd: ~/code/myapp   (/help for commands)
+
+goat > rename the User model to Account and update every reference
+● grep  "class User\b"
+● edit  models/user.py
+● edit  views/account.py
+goat  Renamed User → Account across 6 files. Verify with: pytest tests/models
 ```
 
-Environment variables work too: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`GROQ_API_KEY`, … are picked up automatically for matching providers.
+One-shot mode for scripts and CI:
+
+```bash
+goat -p "summarize what setup.py does" -q
+goat --auto -m openrouter/deepseek-ai/deepseek-v3.2 -p "run the tests and fix failures"
+```
+
+## Providers
+
+`goat providers` lists the full catalog — 183 entries, ✓ marking the ones
+with credentials configured:
+
+```console
+$ goat providers
+ ✓ anthropic                    [claude] https://api.anthropic.com/v1
+ ✓ openai                       [openai] https://api.openai.com/v1
+   deepseek                     [openai] https://api.deepseek.com/v1
+   groq                         [openai] https://api.groq.com/openai/v1
+   ollama-cloud                 [openai] https://ollama.com/v1
+   openrouter                   [openai] https://openrouter.ai/api/v1
+   … 183 providers total
+```
+
+Four wire formats cover every provider; the catalog maps each entry to one:
+
+| Format | Endpoint | Used by |
+|---|---|---|
+| `openai` | `/chat/completions` | OpenAI + ~170 compatible endpoints (Groq, DeepSeek, OpenRouter, vLLM, Ollama, …) |
+| `claude` | `/messages` | Anthropic Messages API (key or OAuth bearer) |
+| `openai-responses` | `/responses` | OpenAI Responses API, ChatGPT Codex |
+| `gemini` | `:streamGenerateContent` | Google Generative Language + Code Assist |
+
+Models per provider:
+
+```console
+$ goat models anthropic
+  anthropic/claude-fable-5-1
+  anthropic/claude-fable-5
+  anthropic/claude-opus-5
+  anthropic/claude-sonnet-4-5
+```
+
+Environment variables are picked up automatically for matching providers:
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`,
+and ~15 more.
+
+## Custom endpoints
+
+Any OpenAI- or Anthropic-compatible URL — LM Studio, vLLM, llama.cpp, a
+company gateway — is one command away:
+
+```console
+$ goat endpoint add ollama --base-url http://localhost:11434/v1 \
+    --format openai --models llama3.2,qwen2.5
+added endpoint 'ollama' (openai) -> http://localhost:11434/v1
+usage: goat -m ollama/<model> "..."
+
+$ goat -m ollama/llama3.2 "explain this repo"
+```
+
+## Subscription OAuth
+
+Turn an existing plan into an API credential — no key purchase needed:
+
+```console
+$ goat auth --list-oauth
+  claude           Claude Pro/Max (OAuth)
+  codex            ChatGPT Plus/Pro (OAuth)
+  gemini           Gemini Code Assist (OAuth)
+  github-copilot   GitHub Copilot (device OAuth)
+  kimi             Kimi For Coding (device OAuth)
+  grok             Grok (import token)
+
+$ goat auth claude --oauth        # browser opens, PKCE + CSRF state
+logged in to claude — try: goat -m claude/claude-sonnet-4-5 "hello"
+```
+
+| Provider | Flow | What happens |
+|---|---|---|
+| Claude Pro/Max | browser (PKCE) | authorize → token exchange → auto-refresh |
+| ChatGPT Plus/Pro (Codex) | browser (PKCE) | Responses API over your subscription |
+| Gemini Code Assist | browser | cloudcode-pa endpoint with OAuth bearer |
+| GitHub Copilot | device code | GitHub device login → Copilot API token |
+| Kimi For Coding | device code | device authorization → token |
+| Grok | token import | paste a bearer from your Grok session |
+
+Tokens live in `~/.goatcode/credentials.json` (chmod 600) and refresh
+transparently before expiry.
 
 ## The TUI
 
 | Key / command | What |
 |---|---|
-| type + Enter | send to the agent |
+| type + `Enter` | send to the agent |
 | `Ctrl+C` | cancel generation |
-| `/model <p/m>` | switch model mid-session |
-| `/providers` `/models` | browse 180+ providers and their models |
-| `/auth <p> --key K` / `--oauth` | add credentials without leaving the chat |
-| `/new` `/sessions` `/resume <id>` | sessions persist to `~/.goatcode/sessions` |
-| `/auto` `/approve` | toggle tool auto-approval |
-| `/help` | everything |
+| `/model <provider/id>` | switch model mid-session |
+| `/providers` · `/models` | browse providers and their models |
+| `/auth <p> --key K` · `--oauth` | add credentials without leaving the chat |
+| `/new` · `/sessions` · `/resume <id>` | session management |
+| `/auto` · `/approve` | toggle tool auto-approval |
+| `/quit` | exit |
 
-## Providers & formats
-
-GoatCode speaks four wire formats and maps every catalog entry to one:
-
-| Format | Used by |
-|---|---|
-| `openai` | OpenAI + ~170 compatible endpoints (Groq, DeepSeek, OpenRouter, vLLM, Ollama, …) |
-| `claude` | Anthropic Messages API (key or OAuth bearer) |
-| `openai-responses` | OpenAI Responses API, ChatGPT Codex |
-| `gemini` | Google Generative Language API |
-
-The provider catalog is derived from
-[OmniRoute](https://github.com/diegosouzapw/OmniRoute)'s registry; the
-architecture (agent loop, tool dispatch, provider/model separation) is a
-clean-room design in the spirit of
-[opencode](https://github.com/anomalyco/opencode), reimplemented in Python.
+Deliberately scrollback-native — no alt-screen redraw loop — so it stays
+smooth over SSH, on ancient terminals (`--plain` drops the widget layer
+entirely), and on low-RAM hardware.
 
 ## Configuration
 
-`~/.goatcode/config.json` (user) and `./goatcode.json` (project) — project wins:
+`~/.goatcode/config.json` (user) and `./goatcode.json` (project — wins):
 
 ```json
 {
@@ -118,22 +199,50 @@ clean-room design in the spirit of
 }
 ```
 
-Env overrides: `GOAT_MODEL`, `GOAT_AUTO_APPROVE`, `GOAT_MAX_TOKENS`,
-`GOATCODE_HOME` (relocate all state — useful on locked-down machines).
+Env overrides: `GOAT_MODEL`, `GOAT_AUTO_APPROVE`, `GOAT_MAX_TOKENS`, and
+`GOATCODE_HOME` to relocate all state.
 
-## Memory & low-end performance
+## Safety model
 
-- Streaming render, never buffering whole responses.
-- Tool output capped (128 KB reads, 32 KB bash output) before it hits RAM.
-- Context compaction drops old turns into a digest — no second LLM call.
-- Dependencies: `httpx`, `rich`, `prompt_toolkit`. That's all.
+- **Permission prompts** — `write`, `edit`, and `bash` show the exact target
+  and wait for `y/n`. `read`/`glob`/`grep` are unrestricted.
+- **Path sandbox** — file tools resolve and reject anything outside the
+  project root (membership check, not string prefix — sibling dirs like
+  `project-old/` are unreachable).
+- **`--auto` is explicit** — it trusts the model with your shell; use it in
+  throwaway checkouts or CI, not on your daily driver.
+- **Bounded output** — 128 KB per read, 32 KB per bash call, so a runaway
+  `find /` can't eat your RAM.
+
+## Performance
+
+Measured on this project (Python 3.10, Windows):
+
+| Metric | Value |
+|---|---|
+| Full import working set | **41 MB** |
+| Dependencies | 3 (`httpx`, `rich`, `prompt_toolkit`) |
+| Cold start (`goat --version`) | ~0.8 s (heavy modules import lazily) |
+| Test suite | 58 tests, ~8 s, no network |
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest tests/ -q      # 47 tests, mocked transport, no network
+python -m pytest tests/ -q
+..........................................................  [100%]
+58 passed in 8.27s
 ```
+
+The demo assets are generated from real sessions:
+`python docs/capture_session.py session.ansi && python docs/render_ansi.py session.ansi out.png out.gif`
+
+## Acknowledgements
+
+- Architecture (agent loop, tool dispatch, provider/model split) is a
+  clean-room design in the spirit of [opencode](https://github.com/anomalyco/opencode).
+- The provider catalog and the OAuth-to-API-key idea come from
+  [OmniRoute](https://github.com/diegosouzapw/OmniRoute).
 
 ## License
 

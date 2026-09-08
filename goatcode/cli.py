@@ -12,19 +12,17 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import sys
 from pathlib import Path
 
-from . import __version__, oauth
-from .agent import Agent
+# Heavy modules (httpx via oauth, prompt_toolkit/rich via tui) are imported
+# lazily inside the commands that need them — keeps `goat providers` and
+# `goat --version` snappy on low-end machines.
+from . import __version__
 from .config import Config, CustomEndpoint, load_config, save_config
 from .providers import OAUTH_PROVIDERS, Credential, ProviderRegistry
-from .runtime import AuthRequired, resolve
-from .session import Session, list_sessions
-from .tools import ToolKit
-from .tui import run_tui
+from .session import list_sessions
 
 
 def _registry(cfg: Config) -> ProviderRegistry:
@@ -44,6 +42,7 @@ def cmd_auth(args: argparse.Namespace) -> int:
         print(f"stored API key for {pid}")
         return 0
     if args.oauth:
+        from . import oauth
         if pid not in OAUTH_PROVIDERS:
             print(f"no OAuth flow for '{pid}'. Available: {', '.join(OAUTH_PROVIDERS)}", file=sys.stderr)
             return 1
@@ -128,6 +127,13 @@ def cmd_sessions(args: argparse.Namespace) -> int:
 
 def cmd_print(args: argparse.Namespace, cfg: Config) -> int:
     """One-shot: run a single prompt non-interactively."""
+    import asyncio
+
+    from .agent import Agent
+    from .runtime import AuthRequired, resolve
+    from .session import Session
+    from .tools import ToolKit
+
     registry = _registry(cfg)
     try:
         resolved = resolve(cfg, registry)
@@ -227,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_print(args, cfg)
 
     registry = _registry(cfg)
+    from .tui import run_tui
     run_tui(cfg, registry, plain=args.plain, resume=args.resume)
     return 0
 
