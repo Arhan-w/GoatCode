@@ -1,14 +1,16 @@
 """TUI construction smoke tests — the class of bug where a widget is built
 with a kwarg the installed library version doesn't accept (WordCompleter
-'sentence_start' vs 'sentence') never reached an agent turn, so the agent-loop
-mocks couldn't catch it. These construct the real objects."""
+'sentence_start' vs 'sentence', HTML '&nbsp;' entities, invalid key names)
+never reached an agent turn, so the agent-loop mocks couldn't catch it.
+These construct the real objects."""
 from __future__ import annotations
 
 import inspect
 
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.completion import CompleteEvent, WordCompleter
+from prompt_toolkit.document import Document
 
-from goatcode.tui import SLASH_COMMANDS, TUI
+from goatcode.tui import SLASH_COMMANDS, SlashCompleter, TUI, _key_bindings
 from goatcode.config import load_config
 from goatcode.providers import ProviderRegistry
 
@@ -21,12 +23,36 @@ def test_word_completer_accepts_our_kwargs():
     assert "sentence_start" not in params  # would have crashed the TUI
 
 
+def test_slash_completer_yields_with_descriptions():
+    comp = SlashCompleter()
+    doc = Document("/mo", cursor_position=3)
+    outs = list(comp.get_completions(doc, CompleteEvent()))
+    names = [c.text for c in outs]
+    assert "/model <provider/id>" in names and "/models" in names
+    assert all(c.display_meta for c in outs)  # every entry shows a description
+    # non-slash input completes nothing
+    assert list(comp.get_completions(Document("hello", 5), CompleteEvent())) == []
+
+
+def test_key_bindings_accept_our_keys():
+    """Regression: 'shift-tab' is not a valid prompt_toolkit key name; 's-tab' is."""
+    kb = _key_bindings(lambda: None)
+    assert len(kb.bindings) >= 1  # constructing with our key names must not raise
+
+
+def test_status_bar_html_parses(isolated_home):
+    """Regression: &nbsp; is not an entity prompt_toolkit's HTML parser knows."""
+    tui = TUI(load_config(), ProviderRegistry(), plain=True)
+    html = str(tui._status_bar())
+    assert "nbsp" not in html and html  # returns a string, no ExpatError raised
+
+
 def test_tui_constructs_and_slash_commands_parse(isolated_home):
     cfg = load_config()
     tui = TUI(cfg, ProviderRegistry(cfg.endpoints), plain=True)
     # every advertised slash command must be handled without raising
     for cmd in ["/help", "/model", "/providers", "/models", "/sessions",
-                "/approve", "/auto", "/compact", "/bogus"]:
+                "/approve", "/auto", "/compact", "/clear", "/new", "/bogus"]:
         assert tui.handle_slash(cmd) is True
 
 

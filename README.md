@@ -12,17 +12,18 @@ into a working API credential and refreshes it for you.
 
 ![GoatCode demo](docs/assets/demo.gif)
 
-[Install](#install) · [Quick start](#quick-start) · [Providers](#providers) ·
-[OAuth](#subscription-oauth) · [TUI](#the-tui) · [Config](#configuration)
+[Install](#install) · [Quick start](#quick-start) · [The TUI](#the-tui) ·
+[Providers](#providers) · [OAuth](#subscription-oauth) · [Config](#configuration)
 
 </div>
 
 ---
 
-## The problem
+## Why GoatCode
 
 Coding agents lock you into one vendor, one billing account, one fat runtime.
-GoatCode is the opposite bet:
+GoatCode is the opposite bet — a single `pip install`, three Python
+dependencies, and your choice of 183 backends:
 
 | | GoatCode |
 |---|---|
@@ -34,12 +35,13 @@ GoatCode is the opposite bet:
 
 ## Demo
 
-A real session — the agent reads a file, calls the `read` tool, and answers:
+A real session — the agent reads a file, calls the `read` tool, and answers.
+Every pixel below is rendered from actual terminal output:
 
 ![GoatCode session](docs/assets/demo.png)
 
-The GIF above is the same session, typed out. Both are rendered from actual
-terminal output (see [`docs/`](docs/)) — not staged screenshots.
+The GIF at the top is the same session, typed out. Nothing staged, nothing
+faked (capture pipeline in [`docs/`](docs/)).
 
 ## Install
 
@@ -60,18 +62,30 @@ $ goat auth anthropic --key sk-ant-...          # store an API key
 stored API key for anthropic
 
 $ goat                                           # launch the TUI
-  ▄▄▄   ▄▄▄  ▄▄▄  ▄▄▄  ▄▄▄
-  █  █  █    █  █ █  █ █
-  █  █  █▄▄  █▄▄  █▄▄  ▀▀▀█
-        GoatCode — every provider, one terminal
+╭─────────────────────────────────────────────────────────────────────────╮
+│                                                                         │
+│   ██████╗  ██████╗  █████╗ ████████╗                                    │
+│  ██╔════╝ ██╔═══██╗██╔══██╗╚══██╔══╝                                    │
+│  ██║      ██║   ██║███████║   ██║                                       │
+│  ██║      ██║   ██║██╔══██║   ██║                                       │
+│  ╚██████╗ ╚██████╔╝██║  ██║   ██║                                       │
+│   ╚═════╝  ╚═════╝ ╚═╝  ╚═╝   ╚═╝                                       │
+│  GoatCode  v0.1  ·  every provider, one terminal                        │
+│  ─────────────────────────────────────────────────────────────────────  │
+│    model  anthropic/claude-sonnet-4-5                                   │
+│    path   ~/code/myapp                                                  │
+│    tips   /help · /providers · shift+tab or ctrl+o toggle auto-approve  │
+│                                                                         │
+╰─────────────────────────────────────────────────────────────────────────╯
 
-model: anthropic/claude-sonnet-4-5   cwd: ~/code/myapp   (/help for commands)
-
-goat > rename the User model to Account and update every reference
+❯ rename the User model to Account and update every reference
 ● grep  "class User\b"
+  ⎿ completed  models/user.py:7:class User(Base):
 ● edit  models/user.py
-● edit  views/account.py
-goat  Renamed User → Account across 6 files. Verify with: pytest tests/models
+  ⎿ completed  edited models/user.py (1 replacement)
+Renamed `User` → `Account` across 6 files. Verify with: pytest tests/models
+
+  ask before edits (ctrl+o to cycle)  ·  anthropic/claude-sonnet-4-5  ·  ~/code/myapp
 ```
 
 One-shot mode for scripts and CI:
@@ -80,6 +94,30 @@ One-shot mode for scripts and CI:
 goat -p "summarize what setup.py does" -q
 goat --auto -m openrouter/deepseek-ai/deepseek-v3.2 -p "run the tests and fix failures"
 ```
+
+## The TUI
+
+A Claude Code-style interface: streaming markdown under a live spinner
+(`thinking… (4s · 212 tok)`), tool calls as `●` lines with `⎿` results,
+slash-command completion with descriptions, and a status bar that always
+shows mode · model · path.
+
+| Key / command | What |
+|---|---|
+| type + `Enter` | send to the agent |
+| `Ctrl+C` | cancel generation |
+| `Shift+Tab` / `Ctrl+O` | toggle auto-approve (like Claude Code's mode cycle) |
+| `/` | completion menu with command descriptions |
+| `/model <provider/id>` | switch model mid-session |
+| `/providers` · `/models` | browse providers and their models |
+| `/auth <p> --key K` · `--oauth` | add credentials without leaving the chat |
+| `/new` · `/clear` · `/sessions` · `/resume <id>` | session management |
+| `/auto` · `/approve` | tool approval modes |
+| `/quit` | exit |
+
+Deliberately scrollback-native — no alt-screen redraw loop — so it stays
+smooth over SSH, on ancient terminals (`--plain` drops the widget layer
+entirely), and on low-RAM hardware.
 
 ## Providers
 
@@ -123,7 +161,7 @@ and ~15 more.
 ## Custom endpoints
 
 Any OpenAI- or Anthropic-compatible URL — LM Studio, vLLM, llama.cpp, a
-company gateway — is one command away:
+company gateway, a local router — is one command away:
 
 ```console
 $ goat endpoint add ollama --base-url http://localhost:11434/v1 \
@@ -162,23 +200,6 @@ logged in to claude — try: goat -m claude/claude-sonnet-4-5 "hello"
 
 Tokens live in `~/.goatcode/credentials.json` (chmod 600) and refresh
 transparently before expiry.
-
-## The TUI
-
-| Key / command | What |
-|---|---|
-| type + `Enter` | send to the agent |
-| `Ctrl+C` | cancel generation |
-| `/model <provider/id>` | switch model mid-session |
-| `/providers` · `/models` | browse providers and their models |
-| `/auth <p> --key K` · `--oauth` | add credentials without leaving the chat |
-| `/new` · `/sessions` · `/resume <id>` | session management |
-| `/auto` · `/approve` | toggle tool auto-approval |
-| `/quit` | exit |
-
-Deliberately scrollback-native — no alt-screen redraw loop — so it stays
-smooth over SSH, on ancient terminals (`--plain` drops the widget layer
-entirely), and on low-RAM hardware.
 
 ## Configuration
 
@@ -223,26 +244,19 @@ Measured on this project (Python 3.10, Windows):
 | Full import working set | **41 MB** |
 | Dependencies | 3 (`httpx`, `rich`, `prompt_toolkit`) |
 | Cold start (`goat --version`) | ~0.8 s (heavy modules import lazily) |
-| Test suite | 58 tests, ~8 s, no network |
+| Test suite | 63 tests, ~9 s, no network |
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
 python -m pytest tests/ -q
-..........................................................  [100%]
-58 passed in 8.27s
+...............................................................  [100%]
+63 passed in 8.65s
 ```
 
 The demo assets are generated from real sessions:
 `python docs/capture_session.py session.ansi && python docs/render_ansi.py session.ansi out.png out.gif`
-
-## Acknowledgements
-
-- Architecture (agent loop, tool dispatch, provider/model split) is a
-  clean-room design in the spirit of [opencode](https://github.com/anomalyco/opencode).
-- The provider catalog and the OAuth-to-API-key idea come from
-  [OmniRoute](https://github.com/diegosouzapw/OmniRoute).
 
 ## License
 

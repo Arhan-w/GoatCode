@@ -70,7 +70,7 @@ def parse_ansi(text: str) -> list[list[tuple[str, tuple]]]:
     return lines_out
 
 
-def render_frame(runs_lines, upto: int, font) -> Image.Image:
+def render_frame(runs_lines, upto: int, font, symbol_font=None, cover=None) -> Image.Image:
     width = PAD_X * 2 + CELL_W * 88
     height = TITLE_H + PAD_Y * 2 + CELL_H * len(runs_lines)
     img = Image.new("RGB", (width, height), (8, 10, 14))
@@ -89,7 +89,8 @@ def render_frame(runs_lines, upto: int, font) -> Image.Image:
             for ch in text:
                 if count >= upto:
                     return img
-                d.text((x, y), ch, font=font, fill=fg or PALETTE[1])
+                use = font if (cover is None or ord(ch) in cover) else symbol_font
+                d.text((x, y), ch, font=use, fill=fg or PALETTE[1])
                 x += CELL_W
                 count += 1
         y += CELL_H
@@ -106,15 +107,25 @@ def main() -> None:
         lines.pop()
     font_path = find_font()
     font = ImageFont.truetype(font_path, 17) if font_path else ImageFont.load_default()
+    # Per-glyph fallback: Consolas lacks ❯ ⎿ ✓ — draw those with a symbol font.
+    cover, symbol_font = None, None
+    try:
+        from fontTools.ttLib import TTFont
+        sym_path = find_symbol_font()
+        if font_path and sym_path:
+            cover = set(TTFont(font_path, fontNumber=0, lazy=True).getBestCmap().keys())
+            symbol_font = ImageFont.truetype(sym_path, 17)
+    except Exception:  # noqa: BLE001 — fallback is cosmetic; never fail the render
+        cover, symbol_font = None, None
     total = sum(len(t) for runs in lines for t, _ in runs)
-    render_frame(lines, total, font).save(png_out)
+    render_frame(lines, total, font, symbol_font, cover).save(png_out)
     print(f"png: {png_out} ({total} chars, {len(lines)} lines)")
     if gif_out:
         frames = []
         step = max(1, total // 60)
         for upto in range(step, total + step, step):
-            frames.append(render_frame(lines, upto, font).convert("P", palette=Image.ADAPTIVE))
-        frames[-1] = render_frame(lines, total, font).convert("P", palette=Image.ADAPTIVE)
+            frames.append(render_frame(lines, upto, font, symbol_font, cover).convert("P", palette=Image.ADAPTIVE))
+        frames[-1] = render_frame(lines, total, font, symbol_font, cover).convert("P", palette=Image.ADAPTIVE)
         frames[0].save(gif_out, save_all=True, append_images=frames[1:], duration=60, loop=0)
         print(f"gif: {gif_out} ({len(frames)} frames)")
 
