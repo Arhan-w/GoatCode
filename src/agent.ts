@@ -4,7 +4,7 @@
  * every provider. Events are yielded so the UI can render incrementally.
  */
 import { buildSystemPrompt } from "./system-prompt.ts";
-import { isRetryableLLMError, type ChatClient, type Message, type StreamEvent, type ToolCall, type ToolSpec } from "./llm.ts";
+import { contentChars, isRetryableLLMError, textOf, type ChatClient, type ContentPart, type Message, type StreamEvent, type ToolCall, type ToolSpec } from "./llm.ts";
 import { Session, summarize } from "./session.ts";
 import { ToolKit, type PermissionFn, type Todo } from "./tools.ts";
 
@@ -86,10 +86,12 @@ export class Agent {
     return msgs;
   }
 
-  async *runTurn(userText: string, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+  async *runTurn(userText: string | ContentPart[], signal?: AbortSignal): AsyncGenerator<AgentEvent> {
     this.session.append({ role: "user", content: userText });
-    if (!this.session.title)
-      this.session.title = userText.trim().split("\n")[0]?.slice(0, 80) ?? "session";
+    if (!this.session.title) {
+      const first = typeof userText === "string" ? userText : textOf(userText);
+      this.session.title = first.trim().split("\n")[0]?.slice(0, 80) ?? "session";
+    }
     let steps = 0;
     while (steps < this.maxSteps) {
       steps += 1;
@@ -117,7 +119,8 @@ export class Agent {
         yield { kind: "tool_start", tool: call.name, args: call.arguments };
         const result = await this.tools.dispatch(call.name, call.arguments);
         this.session.append({
-          role: "tool", content: result.output.slice(0, 60_000),
+          role: "tool",
+          content: result.content ?? result.output.slice(0, 60_000),
           toolCallId: call.id, name: call.name,
         });
         yield { kind: "tool_end", tool: call.name, result: result.output.slice(0, 2000), ok: result.ok };
@@ -200,7 +203,7 @@ export class Agent {
   }
 
   private maybeCompact(): void {
-    const total = this.session.messages.reduce((s, m) => s + m.content.length, 0);
+    const total = this.session.messages.reduce((s, m) => s + contentChars(m.content), 0);
     if (total > COMPACT_TRIGGER_CHARS && this.session.messages.length > 12) {
       const keep = Math.max(8, Math.floor(this.session.messages.length / 3));
       let cut = this.session.messages.length - keep;
@@ -224,7 +227,7 @@ export class Agent {
       return { folded: 0, summary: "", model: false };
     const fold = msgs.slice(this.session.compactedFrom, cut);
     const transcript = fold
-      .map((m) => `${m.role}${m.toolCalls?.length ? `(${m.toolCalls.map((tc) => tc.name).join(",")})` : ""}: ${m.content.slice(0, 700)}`)
+      .map((m) => `${m.role}${m.toolCalls?.length ? `(${m.toolCalls.map((tc) => tc.name).join(",")})` : ""}: ${textOf(m.content).slice(0, 700)}`)
       .join("\n")
       .slice(0, 120_000);
     let summary = "";

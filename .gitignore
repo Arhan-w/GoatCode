@@ -7,3 +7,6 @@ scripts/input-log.txt
 scripts/pty-capture.txt
 scripts/pty-turn.txt
 scripts/pty-plan.txt
+scripts/red.png
+scripts/asset-*.png
+scripts/pty-vision.txt

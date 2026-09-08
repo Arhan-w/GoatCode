@@ -355,6 +355,156 @@ describe("file refs", () => {
     expect(expandFileRefs("@../secret.txt", root)).toContain("@../secret.txt");
     rmSync(root, { recursive: true, force: true });
   });
+
+  test("buildUserContent attaches image refs as base64 parts", async () => {
+    const { buildUserContent } = await import("../src/tui.tsx");
+    const root = mkdtempSync(join(tmpdir(), "goat-img-"));
+    // 1x1 transparent PNG
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64");
+    writeFileSync(join(root, "shot.png"), png);
+    const out = buildUserContent("what color is @shot.png ?", root);
+    expect(typeof out).not.toBe("string");
+    const parts = out as any[];
+    expect(parts[0].type).toBe("text");
+    expect(parts[0].text).toContain("[image: shot.png]");
+    expect(parts[0].text).not.toContain("@shot.png");
+    const img = parts[1];
+    expect(img.type).toBe("image");
+    expect(img.mediaType).toBe("image/png");
+    expect(Buffer.from(img.data, "base64").equals(png)).toBe(true);
+    // plain text without images stays a string
+    expect(typeof buildUserContent("no refs here", root)).toBe("string");
+    // missing image: placeholder untouched
+    expect((buildUserContent("@nope.png", root) as any)).toBe("@nope.png");
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ---------- image wire formats ----------
+describe("image content on the wire", () => {
+  const imgMsg = [
+    { role: "user", content: [
+      { type: "text", text: "look" },
+      { type: "image", data: "AAB=", mediaType: "image/png" },
+    ] },
+  ] as any[];
+
+  test("anthropic: user image part -> image block w/ base64 source", async () => {
+    const { AnthropicClient } = await import("../src/llm.ts");
+    const { msgs } = AnthropicClient.systemAndMessages(imgMsg);
+    expect(msgs[0].content[1]).toEqual({
+      type: "image", source: { type: "base64", media_type: "image/png", data: "AAB=" },
+    });
+  });
+
+  test("anthropic: tool result content parts -> tool_result with image blocks", async () => {
+    const { AnthropicClient } = await import("../src/llm.ts");
+    const { msgs } = AnthropicClient.systemAndMessages([
+      { role: "tool", toolCallId: "t1", name: "read", content: [
+        { type: "text", text: "[image shot.png]" },
+        { type: "image", data: "AAB=", mediaType: "image/png" },
+      ] },
+    ] as any[]);
+    const tr = msgs[0].content[0];
+    expect(tr.type).toBe("tool_result");
+    expect(tr.content.length).toBe(2);
+    expect(tr.content[1].type).toBe("image");
+  });
+
+  test("openai: user image part -> image_url data URL", async () => {
+    const { OpenAIChatClient } = await import("../src/llm.ts");
+    let sentBody: any;
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = ((url: any, init: any) => {
+      sentBody = JSON.parse(init.body);
+      return Promise.resolve(new Response("data: [DONE]\n\n", { status: 200 }));
+    }) as any;
+    try {
+      const client = new OpenAIChatClient("http://mock");
+      for await (const _ of client.streamChat(imgMsg, [], { model: "m", maxTokens: 10 })) void _;
+      const parts = sentBody.messages[0].content;
+      expect(parts[1].type).toBe("image_url");
+      expect(parts[1].image_url.url).toBe("data:image/png;base64,AAB=");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  test("gemini: image part -> inlineData", async () => {
+    const { GeminiClient } = await import("../src/llm.ts");
+    const { contents } = GeminiClient.contentsAndSystem(imgMsg as any);
+    expect(contents[0].parts[1]).toEqual({ inlineData: { mimeType: "image/png", data: "AAB=" } });
+  });
+
+  test("toolkit read on a png returns image content", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-readimg-"));
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64");
+    writeFileSync(join(root, "x.png"), png);
+    const r = await new ToolKit(root, { autoApprove: true }).dispatch("read", { path: "x.png" });
+    expect(r.ok).toBe(true);
+    expect(r.content).toBeDefined();
+    expect(r.content![1].type).toBe("image");
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ---------- new slash commands ----------
+describe("slash extras", () => {
+  const mkIo = (s: any, captured: string[]) => ({
+    session: s,
+    push: (n: any) => { captured.push(JSON.stringify(n?.props?.children ?? n)); },
+    cfg: { model: "mock/m", provider: "mock", maxTokens: 8192, autoApprove: false, pluginDirs: [] } as any,
+    setCfg: () => {}, registry: { get: () => undefined, resolveCredential: () => null } as any,
+    setSession: () => {}, saveCfg: () => {},
+    exit: () => {}, mcp: null, skills: [], undoTurn: () => 0, backgroundTasks: () => [],
+    setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub",
+  });
+
+  test("/rename sets and persists the session title", async () => {
+    const { runSlash } = await import("../src/commands.tsx");
+    const { Session } = await import("../src/session.ts");
+    const s = Session.new(home, "mock/m");
+    const out: string[] = [];
+    expect(runSlash("/rename demo title", mkIo(s, out) as any)).toBe(true);
+    expect(s.title).toBe("demo title");
+  });
+
+  test("/usage and /status render without throwing", async () => {
+    const { runSlash } = await import("../src/commands.tsx");
+    const { Session } = await import("../src/session.ts");
+    const s = Session.new(home, "mock/m");
+    s.usage = { in: 1234, out: 56 };
+    s.append({ role: "user", content: "hi" });
+    s.append({ role: "assistant", content: "yo" });
+    const out: string[] = [];
+    expect(runSlash("/usage", mkIo(s, out) as any)).toBe(true);
+    expect(out.join(" ")).toContain("1,234");
+    expect(runSlash("/status", mkIo(s, out) as any)).toBe(true);
+    expect(out.join(" ")).toContain("mock/m");
+  });
+
+  test("/memory reports GOAT.md tail", async () => {
+    const { runSlash } = await import("../src/commands.tsx");
+    const { Session } = await import("../src/session.ts");
+    writeFileSync(join(home, "GOAT.md"), "- use bun, not npm\n");
+    const s = Session.new(home, "mock/m");
+    const out: string[] = [];
+    expect(runSlash("/memory", mkIo(s, out) as any)).toBe(true);
+    expect(out.join(" ")).toContain("use bun, not npm");
+  });
+
+  test("SLASH_COMMANDS includes the new commands with descriptions", async () => {
+    const { SLASH_COMMANDS, COMMAND_DESC } = await import("../src/commands.tsx");
+    for (const c of ["/usage", "/status", "/rename", "/memory"]) {
+      expect(SLASH_COMMANDS).toContain(c);
+      expect(COMMAND_DESC[c]).toBeTruthy();
+    }
+  });
 });
 
 // ---------- plan-mode ----------

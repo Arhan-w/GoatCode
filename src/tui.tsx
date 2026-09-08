@@ -10,7 +10,7 @@
  */
 import { Box, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve as resolvePath } from "node:path";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Agent, type AgentEvent } from "./agent.ts";
@@ -23,7 +23,8 @@ import { loadSkills, loadSkillBody, type SkillDef } from "./skills/loader.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import { buildExtraSystem } from "./context.ts";
 import { loadMcpFromConfig, type McpClient } from "./mcp/client.ts";
-import { ToolKit } from "./tools.ts";
+import { ToolKit, IMAGE_TYPES, MAX_IMAGE_BYTES } from "./tools.ts";
+import type { ContentPart } from "./llm.ts";
 import type { Todo } from "./tools.ts";
 
 // ---------- theme (goat violet) ----------
@@ -64,6 +65,7 @@ function shortPath(p: string): string {
 /** Replace @path tokens with fenced file contents (sandboxed to cwd). */
 export function expandFileRefs(text: string, cwd: string, push?: (n: ReactNode) => void): string {
   return text.replace(/(^|\s)@([^\s@]+)/g, (_all, pre: string, ref: string) => {
+    if (/\.(png|jpe?g|gif|webp)$/i.test(ref)) return `${pre}@${ref}`; // handled by buildUserContent
     try {
       const abs = resolvePath(cwd, ref);
       const rel = relative(cwd, abs);
@@ -75,6 +77,34 @@ export function expandFileRefs(text: string, cwd: string, push?: (n: ReactNode) 
       return `${pre}@${ref}`;
     }
   });
+}
+
+/**
+ * Build the user message: text @refs inline (fenced), image @refs become
+ * base64 content parts with an [image: path] marker left in the text.
+ * Returns a plain string when nothing image-shaped matched.
+ */
+export function buildUserContent(text: string, cwd: string, push?: (n: ReactNode) => void): string | ContentPart[] {
+  const images: ContentPart[] = [];
+  const replaced = text.replace(/(^|\s)@([^\s@]+\.(?:png|jpe?g|gif|webp))/gi, (_all, pre: string, ref: string) => {
+    try {
+      const abs = resolvePath(cwd, ref);
+      const rel = relative(cwd, abs);
+      if (rel === "" || rel.startsWith("..")) return `${pre}@${ref}`; // outside sandbox — leave
+      if (!existsSync(abs)) { push?.(<Text color={RED}>  ⚠ @{ref} not found</Text>); return `${pre}@${ref}`; }
+      const size = statSync(abs).size;
+      if (size > MAX_IMAGE_BYTES) { push?.(<Text color={RED}>  ⚠ @{ref} too large ({size} bytes)</Text>); return `${pre}@${ref}`; }
+      const ext = ref.slice(ref.lastIndexOf(".")).toLowerCase();
+      const mediaType = IMAGE_TYPES[ext] ?? "image/png";
+      images.push({ type: "image", data: readFileSync(abs).toString("base64"), mediaType });
+      return `${pre}[image: ${ref}]`;
+    } catch {
+      return `${pre}@${ref}`;
+    }
+  });
+  const expanded = expandFileRefs(replaced, cwd, push);
+  if (!images.length) return expanded;
+  return [{ type: "text", text: expanded }, ...images];
 }
 
 type Mode = "default" | "acceptEdits" | "plan" | "bypass";
@@ -219,7 +249,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     }
   }, [askPermission, mcp, push]);
 
-  const runTurn = useCallback(async (text: string) => {
+  const runTurn = useCallback(async (text: string | ContentPart[]) => {
     const agent = await buildAgent();
     if (!agent) return;
     agent.tools.beginCheckpoint(); // /undo reverts everything from here on
@@ -318,6 +348,12 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const submit = useCallback((raw: string) => {
     const text = raw.trim();
     if (!text || thinking) return;
+    // Enter with the completion menu open accepts, like Claude Code
+    if (completions.length > 0 && compSel < completions.length && text.startsWith("/")) {
+      setInput(completions[compSel] + " ");
+      setCompletions([]);
+      return;
+    }
     setHistory((h) => [...h, text]);
     setHistIdx(-1);
     setInput("");
@@ -355,8 +391,9 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
 
-    // @file references — expand @path into the prompt as fenced content
-    const expanded = expandFileRefs(text, sessionRef.current.cwd, push);
+    // @file references — text refs inline as fenced content; image refs attach
+    // base64 parts the model can see (anthropic/openai/gemini/responses)
+    const expanded = buildUserContent(text, sessionRef.current.cwd, push);
 
     // /skill-name invocation: load the body and run it as a prompt
     if (text.startsWith("/") && !SLASH_COMMANDS.some((c) => text === c || text.startsWith(c + " "))) {
@@ -391,7 +428,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     void runTurn(expanded);
-  }, [thinking, push, mcp, skills, exit, runTurn]);
+  }, [thinking, push, mcp, skills, exit, runTurn, completions, compSel]);
 
   const cycleMode = useCallback(() => {
     setMode((m) => {
@@ -426,6 +463,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     if (k.ctrl && ch === "d") { exit(); return; }
+    if (k.ctrl && ch === "k") { setInput(""); return; } // clear current input line
     if (k.ctrl && ch === "t") {
       const rows = toolsRef.current?.backgroundTasks() ?? [];
       if (!rows.length) push(<Text dimColor color={DIM}>  no background tasks</Text>);
@@ -440,6 +478,17 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     if (k.ctrl && ch === "o") { cycleMode(); return; }
+    if (k.ctrl && ch === "l") { setLines([]); setStream(""); return; } // clear scrollback, keep session
+    if (k.ctrl && ch === "r") {
+      // reverse history search: cycle inserted prompt from history
+      if (history.length) {
+        const q = input.trim();
+        const idx = history.map((h, i) => ({ h, i })).reverse()
+          .find(({ h }) => !q || h.toLowerCase().includes(q.toLowerCase()));
+        if (idx) setInput(history[idx.i]);
+      }
+      return;
+    }
     if (k.meta && ch === "m") { cycleMode(); return; } // Windows fallback for Shift+Tab
     if (k.escape && thinking) { abortRef.current?.abort(); return; }
     if (k.upArrow) {

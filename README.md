@@ -28,7 +28,7 @@ markdown under a live spinner, sandboxed tools with permission prompts,
 | Extensibility | — | **MCP servers** (stdio/http/sse) · **skills** (SKILL.md) · **plugins** |
 | Context | — | **@file references** · **!bash mode** · **# memory** → GOAT.md |
 | Resilience | one-shot failure | **retry w/ jittered backoff** on 429/5xx/network, `retry-after` honored, esc interrupts mid-request |
-| Engine | 60 tests | same 4 wire formats, OAuth flows, sessions, compaction — **40 TS tests + full e2e** |
+| Engine | 60 tests | same 4 wire formats, OAuth flows, sessions, compaction, **vision input** — **54 TS tests + full e2e** |
 
 ## Install
 
@@ -97,16 +97,21 @@ Claude Code's interaction model, GoatCode's engine:
 
 | Key / command | What |
 |---|---|
-| `Enter` | send · `Ctrl+C` cancel/exit · `Esc` interrupt |
+| `Enter` | send · `Ctrl+C` cancel/exit (×2) · `Esc` interrupt |
 | `Shift+Tab` / `Ctrl+O` | cycle permission mode |
-| `Ctrl+T` | background task list |
+| `Ctrl+T` / `Ctrl+K` / `Ctrl+L` / `Ctrl+R` | tasks · clear input · clear screen · search history |
 | `/model <p/id>` · `/models` · `/providers` | switch and browse |
 | `/auth <p> --key K` · `--oauth` | credentials in-chat |
 | `/mcp` · `/skills` · `/plugin` | extensions status |
 | `/new` `/clear` `/compact` `/sessions` `/resume <id>` | sessions |
 | `/undo` | revert the last turn's file changes (snapshot per mutation) |
 | `/tasks` | background bash jobs started with `bash background:true` |
-| `/cost` `/context` `/doctor` `/init` `/review` | diagnostics |
+| `/cost` `/usage` `/context` `/status` `/doctor` | diagnostics |
+| `/rename <t>` `/memory` `/init` `/review` | session & project |
+
+**@file works with images too** — `what's wrong in @screenshot.png?` attaches
+the actual pixels to your message on Claude, GPT-4o-class, Responses, and
+Gemini models. The `read` tool shows images to the model as well.
 
 **`/compact` is real** — it asks the model for a dense continuation
 summary of your old context (goals, decisions, files touched, open
@@ -229,14 +234,14 @@ Tokens live in `~/.goatcode/credentials.json` and auto-refresh before expiry.
 |---|---|
 | Cold start (`goat --version`) | **~0.6 s** (binary) |
 | Binary | single file, no runtime install |
-| Tests | 44 bun tests + live e2e under a real ConPTY (providers, MCP, skills, plugins, agent loop, undo, retry, timeout, plan panel) |
+| Tests | 54 bun tests + live e2e under a real ConPTY (providers, MCP, skills, plugins, agent loop, undo, retry, timeout, plan panel, vision) |
 | Type check | `tsc --noEmit` clean, strict |
 
 ## Development
 
 ```bash
 bun install
-bun test                    # 44 tests, ~6s, no network
+bun test                    # 54 tests, ~6s, no network
 bunx tsc --noEmit           # strict type check
 bun run src/index.ts        # dev TUI
 bun build src/index.ts --compile --outfile dist/goat   # ship it

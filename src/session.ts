@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 import { appDir } from "./config.ts";
 import type { Message, ToolCall } from "./llm.ts";
+import { textOf } from "./llm.ts";
 
 export interface SessionData {
   id: string;
@@ -127,9 +128,11 @@ export function listSessions(): { id: string; model: string; title: string }[] {
 export function summarize(messages: Message[]): string {
   const parts: string[] = [];
   for (const m of messages.slice(0, 60)) {
-    const head = m.content.split("\n").slice(0, 2).join(" ").slice(0, 160);
+    const text = textOf(m.content);
+    const head = text.split("\n").slice(0, 2).join(" ").slice(0, 160);
+    const img = text.includes("[image]") ? " [image]" : "";
     const tools = m.toolCalls?.map((tc: ToolCall) => `${tc.name}(${String(tc.arguments.path ?? tc.arguments.command ?? "").slice(0, 60)})`).join(", ");
-    parts.push(`${m.role}: ${head}${tools ? ` [called: ${tools}]` : ""}`);
+    parts.push(`${m.role}: ${head}${img}${tools ? ` [called: ${tools}]` : ""}`);
   }
   return `[Summary of ${messages.length} earlier messages]\n${parts.join("\n")}`;
 }

@@ -8,7 +8,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import type { ToolSpec } from "./llm.ts";
+import type { ContentPart, ToolSpec } from "./llm.ts";
 
 export const MAX_READ_BYTES = 128_000;
 export const MAX_BASH_OUTPUT = 32_000;
@@ -17,6 +17,11 @@ export const GREP_MAX_RESULTS = 200;
 export const GLOB_MAX_RESULTS = 300;
 export const MAX_UNDO = 50;
 export const MAX_SNAP_BYTES = 512_000;
+export const MAX_IMAGE_BYTES = 5_000_000;
+export const IMAGE_TYPES: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".gif": "image/gif", ".webp": "image/webp",
+};
 export const SKIP_DIRS = new Set([
   ".git", "node_modules", "__pycache__", ".venv", "venv", "dist",
   "build", ".next", ".cache", "target", ".tox", ".mypy_cache",
@@ -25,6 +30,8 @@ export const SKIP_DIRS = new Set([
 export interface ToolResult {
   ok: boolean;
   output: string;
+  /** Multimodal payload (e.g. read on an image) — carried into the tool message. */
+  content?: ContentPart[];
 }
 
 export type PermissionFn = (tool: string, args: Record<string, unknown>) => Promise<boolean> | boolean;
@@ -246,6 +253,20 @@ export class ToolKit {
   tool_read(args: Record<string, any>): ToolResult {
     const p = this.inside(String(args.path));
     if (!existsSync(p) || !statSync(p).isFile()) return { ok: false, output: `not a file: ${args.path}` };
+    const ext = p.toLowerCase().slice(p.lastIndexOf("."));
+    const mediaType = IMAGE_TYPES[ext];
+    if (mediaType) {
+      // vision input: hand the raw bytes to the model as an image content part
+      const size = statSync(p).size;
+      if (size > MAX_IMAGE_BYTES)
+        return { ok: false, output: `image too large (${size} bytes; max ${MAX_IMAGE_BYTES})` };
+      const b64 = readFileSync(p).toString("base64");
+      return {
+        ok: true,
+        output: `read image ${args.path} (${mediaType}, ${size} bytes)`,
+        content: [{ type: "text", text: `[image ${args.path}]` }, { type: "image", data: b64, mediaType }],
+      };
+    }
     let text: string;
     try { text = readFileSync(p, "utf8"); } catch { return { ok: false, output: `${args.path} is not UTF-8 text` }; }
     const lines = text.split("\n");
@@ -421,7 +442,7 @@ export class ToolKit {
 
 function builtinSpecs(): ToolSpec[] {
   return [
-    { name: "read", description: "Read a file from the project. Returns text with line numbers.",
+    { name: "read", description: "Read a file from the project. Text files return numbered lines; images (png/jpg/gif/webp) are shown to the model visually.",
       parameters: { type: "object", properties: {
         path: { type: "string", description: "File path relative to project root" },
         offset: { type: "integer", description: "1-based start line (optional)" },

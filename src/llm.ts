@@ -20,12 +20,37 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+/** Wire-agnostic multimodal content part. Image data is base64 (no prefix). */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mediaType: string };
+
 export interface Message {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: string | ContentPart[];
   toolCalls?: ToolCall[];
   toolCallId?: string;
   name?: string;
+}
+
+export function partsOf(content: string | ContentPart[]): ContentPart[] {
+  return typeof content === "string" ? [{ type: "text", text: content }] : content;
+}
+
+/** Plain-text projection (for digests, size math, transcript display). */
+export function textOf(content: string | ContentPart[]): string {
+  if (typeof content === "string") return content;
+  return content.map((p) => (p.type === "text" ? p.text : "[image]")).join("\n");
+}
+
+export function hasImages(content: string | ContentPart[]): boolean {
+  return typeof content !== "string" && content.some((p) => p.type === "image");
+}
+
+/** Rough wire-cost length of a message: text length + ~1.5x base64 image payload. */
+export function contentChars(content: string | ContentPart[]): number {
+  if (typeof content === "string") return content.length;
+  return content.reduce((s, p) => s + (p.type === "text" ? p.text.length : Math.ceil(p.data.length * 1.5)), 0);
 }
 
 export interface StreamEvent {
@@ -164,17 +189,25 @@ export class OpenAIChatClient implements ChatClient {
       stream: true,
       stream_options: { include_usage: true },
       messages: messages.flatMap((m): any[] => {
-        if (m.role === "system") return [{ role: "system", content: m.content }];
+        if (m.role === "system") return [{ role: "system", content: textOf(m.content) }];
         if (m.role === "tool")
-          return [{ role: "tool", tool_call_id: m.toolCallId, content: m.content }];
+          return [{ role: "tool", tool_call_id: m.toolCallId, content: textOf(m.content) }];
         if (m.role === "assistant" && m.toolCalls?.length)
           return [{
-            role: "assistant", content: m.content || null,
+            role: "assistant", content: textOf(m.content) || null,
             tool_calls: m.toolCalls.map((tc) => ({
               id: tc.id, type: "function",
               function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
             })),
           }];
+        if (m.role === "user" && typeof m.content !== "string") {
+          return [{
+            role: "user",
+            content: m.content.map((p) => p.type === "text"
+              ? { type: "text", text: p.text }
+              : { type: "image_url", image_url: { url: `data:${p.mediaType};base64,${p.data}` } }),
+          }];
+        }
         return [{ role: m.role, content: m.content }];
       }),
     };
@@ -238,9 +271,15 @@ export class AnthropicClient implements ChatClient {
     let system = "";
     const msgs: any[] = [];
     for (const m of messages) {
-      if (m.role === "system") { system += (system ? "\n\n" : "") + m.content; continue; }
+      if (m.role === "system") { system += (system ? "\n\n" : "") + textOf(m.content); continue; }
       if (m.role === "tool") {
-        const block = { type: "tool_result", tool_use_id: m.toolCallId, content: m.content };
+        // tool_result content: text stays a string; multimodal blocks pass through
+        // (Anthropic renders images inside tool_result natively)
+        const block: any = { type: "tool_result", tool_use_id: m.toolCallId };
+        if (typeof m.content === "string") block.content = m.content;
+        else block.content = m.content.map((p) => p.type === "text"
+          ? { type: "text", text: p.text }
+          : { type: "image", source: { type: "base64", media_type: p.mediaType, data: p.data } });
         const last = msgs[msgs.length - 1];
         if (last?.role === "user" && Array.isArray(last.content) &&
             last.content.every((b: any) => b.type === "tool_result"))
@@ -250,10 +289,19 @@ export class AnthropicClient implements ChatClient {
       }
       if (m.role === "assistant") {
         const content: any[] = [];
-        if (m.content) content.push({ type: "text", text: m.content });
+        if (m.content) content.push({ type: "text", text: textOf(m.content) });
         for (const tc of m.toolCalls ?? [])
           content.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.arguments });
         if (content.length) msgs.push({ role: "assistant", content });
+        continue;
+      }
+      if (typeof m.content !== "string") {
+        msgs.push({
+          role: "user",
+          content: m.content.map((p) => p.type === "text"
+            ? { type: "text", text: p.text }
+            : { type: "image", source: { type: "base64", media_type: p.mediaType, data: p.data } }),
+        });
         continue;
       }
       msgs.push({ role: "user", content: m.content });
@@ -341,15 +389,25 @@ export class OpenAIResponsesClient implements ChatClient {
     const input: any[] = [];
     let instructions = "";
     for (const m of messages) {
-      if (m.role === "system") { instructions += (instructions ? "\n\n" : "") + m.content; continue; }
+      if (m.role === "system") { instructions += (instructions ? "\n\n" : "") + textOf(m.content); continue; }
       if (m.role === "tool") {
-        input.push({ type: "function_call_output", call_id: m.toolCallId, output: m.content });
+        input.push({ type: "function_call_output", call_id: m.toolCallId, output: textOf(m.content) });
         continue;
       }
       if (m.role === "assistant" && m.toolCalls?.length) {
-        if (m.content) input.push({ role: "assistant", content: m.content });
+        const t = textOf(m.content);
+        if (t) input.push({ role: "assistant", content: t });
         for (const tc of m.toolCalls)
           input.push({ type: "function_call", call_id: tc.id, name: tc.name, arguments: JSON.stringify(tc.arguments) });
+        continue;
+      }
+      if (m.role === "user" && typeof m.content !== "string") {
+        input.push({
+          role: "user",
+          content: m.content.map((p) => p.type === "text"
+            ? { type: "input_text", text: p.text }
+            : { type: "input_image", image_url: `data:${p.mediaType};base64,${p.data}` }),
+        });
         continue;
       }
       input.push({ role: m.role, content: m.content });
@@ -440,9 +498,9 @@ export class GeminiClient implements ChatClient {
     let system = "";
     const contents: any[] = [];
     for (const m of messages) {
-      if (m.role === "system") { system += (system ? "\n\n" : "") + m.content; continue; }
+      if (m.role === "system") { system += (system ? "\n\n" : "") + textOf(m.content); continue; }
       if (m.role === "tool") {
-        const part = { functionResponse: { name: m.name ?? "", response: { output: m.content } } };
+        const part = { functionResponse: { name: m.name ?? "", response: { output: textOf(m.content) } } };
         const last = contents[contents.length - 1];
         if (last?.role === "user" && last.parts.every((p: any) => p.functionResponse)) last.parts.push(part);
         else contents.push({ role: "user", parts: [part] });
@@ -450,10 +508,20 @@ export class GeminiClient implements ChatClient {
       }
       if (m.role === "assistant") {
         const parts: any[] = [];
-        if (m.content) parts.push({ text: m.content });
+        const t = textOf(m.content);
+        if (t) parts.push({ text: t });
         for (const tc of m.toolCalls ?? [])
           parts.push({ functionCall: { name: tc.name, args: tc.arguments } });
         if (parts.length) contents.push({ role: "model", parts });
+        continue;
+      }
+      if (typeof m.content !== "string") {
+        contents.push({
+          role: "user",
+          parts: m.content.map((p) => p.type === "text"
+            ? { text: p.text }
+            : { inlineData: { mimeType: p.mediaType, data: p.data } }),
+        });
         continue;
       }
       contents.push({ role: "user", parts: [{ text: m.content }] });

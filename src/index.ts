@@ -13,7 +13,7 @@
  *   goat -c | --continue          resume the most recent session
  *   goat mcp add <name> <cmd>     add an MCP server
  */
-import { run, expandFileRefs } from "./tui.tsx";
+import { run, expandFileRefs, buildUserContent } from "./tui.tsx";
 import { appDir, loadConfig, saveConfig, splitModel, type CustomEndpoint } from "./config.ts";
 import { CredentialStore, OAUTH_PROVIDERS, ProviderRegistry, type Credential } from "./providers.ts";
 import { listSessions } from "./session.ts";
@@ -222,7 +222,7 @@ async function main(): Promise<number> {
       extraSystem: buildExtraSystem(allSkills(cfg), process.cwd()),
     });
     let out = "";
-    const expandedPrompt = expandFileRefs(prompt, process.cwd());
+    const expandedPrompt = buildUserContent(prompt, process.cwd());
     for await (const ev of agent.runTurn(expandedPrompt)) {
       if (ev.kind === "text") { out += ev.text; if (!quiet) process.stdout.write(ev.text); }
       else if (ev.kind === "tool_start" && !quiet) process.stderr.write(`\n[tool ${ev.tool} ${JSON.stringify(ev.args).slice(0, 100)}]\n`);
