@@ -5,7 +5,7 @@
  * boundaries, config layering. No network.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -319,6 +319,104 @@ describe("file refs", () => {
     expect(out).toContain("world");
     // outside root → untouched
     expect(expandFileRefs("@../secret.txt", root)).toContain("@../secret.txt");
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ---------- plan-mode ----------
+describe("plan mode", () => {
+  test("readonly Toolkit blocks mutating ops up front", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-plan-"));
+    writeFileSync(join(root, "f.txt"), "hello");
+    const tk = new ToolKit(root, { readonly: true });
+    const write = await tk.dispatch("write", { path: "f.txt", content: "bye" });
+    expect(write.ok).toBe(false);
+    expect((write as any).output).toContain("plan mode");
+    const edit = await tk.dispatch("edit", { path: "f.txt", old_string: "hello", new_string: "bye" });
+    expect(edit.ok).toBe(false);
+    expect((edit as any).output).toContain("plan mode");
+    const bash = await tk.dispatch("bash", { command: "echo hi" });
+    expect(bash.ok).toBe(false);
+    expect((bash as any).output).toContain("plan mode");
+    // reads still work
+    const read = tk.tool_read({ path: "f.txt" });
+    expect(read.ok).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ---------- undo / checkpoints ----------
+describe("undo", () => {
+  test("undo restores an edited file", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-undo-"));
+    writeFileSync(join(root, "u.txt"), "original");
+    const tk = new ToolKit(root, { autoApprove: true });
+    await tk.dispatch("edit", { path: "u.txt", old_string: "original", new_string: "changed" });
+    expect(readFileSync(join(root, "u.txt"), "utf8")).toBe("changed");
+    const rec = tk.undo();
+    expect(rec?.path).toContain("u.txt");
+    expect(readFileSync(join(root, "u.txt"), "utf8")).toBe("original");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("undo of a created file deletes it", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-undo-"));
+    const tk = new ToolKit(root, { autoApprove: true });
+    await tk.dispatch("write", { path: "new.txt", content: "born here" });
+    expect(existsSync(join(root, "new.txt"))).toBe(true);
+    tk.undo();
+    expect(existsSync(join(root, "new.txt"))).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("undoCheckpoint reverts a whole turn, later turns stay", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-undo-"));
+    writeFileSync(join(root, "a.txt"), "A0");
+    writeFileSync(join(root, "b.txt"), "B0");
+    const tk = new ToolKit(root, { autoApprove: true });
+    // turn 1 edits a and b
+    tk.beginCheckpoint();
+    await tk.dispatch("edit", { path: "a.txt", old_string: "A0", new_string: "A1" });
+    await tk.dispatch("edit", { path: "b.txt", old_string: "B0", new_string: "B1" });
+    // turn 2 writes a new file
+    tk.beginCheckpoint();
+    await tk.dispatch("write", { path: "c.txt", content: "C" });
+    // undoing the last turn deletes c.txt only
+    expect(tk.undoCheckpoint()).toBe(1);
+    expect(existsSync(join(root, "c.txt"))).toBe(false);
+    expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("A1");
+    // undoing the first turn restores a and b
+    expect(tk.undoCheckpoint()).toBe(2);
+    expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("A0");
+    expect(readFileSync(join(root, "b.txt"), "utf8")).toBe("B0");
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ---------- background bash ----------
+describe("background bash", () => {
+  test("background:true returns immediately and tasks tool lists it", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-bg-"));
+    const tk = new ToolKit(root, { autoApprove: true });
+    const t0 = Date.now();
+    const r = await tk.dispatch("bash", { command: "timeout 2 2>nul || sleep 2", background: true });
+    expect(Date.now() - t0).toBeLessThan(1500); // didn't wait for the 2s command
+    expect(r.ok).toBe(true);
+    expect((r as any).output).toContain("background task");
+    const id = ((r as any).output.match(/task (bg_\S+)/) ?? [])[1];
+    expect(id).toBeTruthy();
+    expect(tk.backgroundTasks().some((t) => t.id === id)).toBe(true);
+    const listed = await tk.dispatch("tasks", {});
+    expect((listed as any).output).toContain(id);
+    // wait for completion, status changes
+    await new Promise((res) => setTimeout(res, 2600));
+    const done = tk.backgroundTasks().find((t) => t.id === id)!;
+    expect(done.status).not.toBe("running");
     rmSync(root, { recursive: true, force: true });
   });
 });

@@ -30,6 +30,7 @@ export interface Message {
 
 export interface StreamEvent {
   textDelta?: string;
+  thinkingDelta?: string;
   toolCalls?: ToolCall[];
   usage?: { prompt: number; completion: number };
   error?: string;
@@ -252,6 +253,7 @@ export class AnthropicClient implements ChatClient {
         case "content_block_delta": {
           const d = obj.delta;
           if (d?.type === "text_delta") yield { textDelta: d.text };
+          else if (d?.type === "thinking_delta") yield { thinkingDelta: d.thinking };
           else if (d?.type === "input_json_delta" && toolBuf.has(obj.index))
             toolBuf.get(obj.index)!.json += d.partial_json;
           break;
@@ -335,6 +337,7 @@ export class OpenAIResponsesClient implements ChatClient {
       if (!obj) continue;
       const type = obj.type ?? "";
       if (type === "response.output_text.delta") yield { textDelta: obj.delta };
+      else if (type === "response.reasoning_summary_text.delta") yield { thinkingDelta: obj.delta };
       else if (type === "response.function_call_arguments.delta") {
         const key = String(obj.item_id ?? obj.output_index ?? 0);
         const cur = calls.get(key) ?? { id: obj.item_id ?? key, name: obj.name ?? "", args: "" };

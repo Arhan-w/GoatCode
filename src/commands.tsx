@@ -16,7 +16,7 @@ export const SLASH_COMMANDS = [
   "/help", "/model", "/models", "/providers", "/auth", "/logout",
   "/new", "/clear", "/compact", "/sessions", "/resume",
   "/mcp", "/skills", "/plugin", "/cost", "/context", "/config",
-  "/doctor", "/init", "/review", "/quit",
+  "/doctor", "/init", "/review", "/undo", "/tasks", "/quit",
 ];
 
 export interface SlashIO {
@@ -30,6 +30,9 @@ export interface SlashIO {
   exit(): void;
   mcp: McpClient | null;
   skills: SkillDef[];
+  /** Revert the last turn's file mutations; -1 = no toolkit, count = reverted. */
+  undoTurn(): number;
+  backgroundTasks(): { id: string; cmd: string; status: string; started: number }[];
   setMode(mode: "default" | "acceptEdits" | "plan" | "bypass"): void;
   runTurn(text: string): Promise<void>;
 }
@@ -218,9 +221,9 @@ export function runSlash(line: string, io: SlashIO): boolean {
       return true;
 
     case "/cost": {
-      const msgs = io.session.messages;
-      const chars = msgs.reduce((s, m) => s + m.content.length, 0);
-      io.push(<Text>  session: {msgs.length} messages · ~{Math.round(chars / 4)} tokens · model {io.cfg.model}</Text>);
+      const u = io.session.usage;
+      const est = Math.round(io.session.messages.reduce((s, m) => s + m.content.length, 0) / 4);
+      io.push(<Text>  session: {io.session.messages.length} messages · {u.in} in / {u.out} out tokens{u.in ? ` (est context ~${est})` : ` (est ~${est}, no usage reported yet)`} · model {io.cfg.model}</Text>);
       return true;
     }
 
@@ -253,6 +256,33 @@ export function runSlash(line: string, io: SlashIO): boolean {
     case "/review": {
       const target = rest.join(" ") || "the current branch changes";
       void io.runTurn(`Review ${target}. Report bugs, security issues, and simplifications — most severe first.`);
+      return true;
+    }
+
+    case "/undo": {
+      const r = io.undoTurn();
+      if (r === null) io.push(<Text dimColor color="#8a8a8a">  nothing to undo</Text>);
+      else if (r === 0) io.push(<Text color="#f87171">✗ no tool kit yet — run a turn first</Text>);
+      else io.push(<Text color="#4ade80">✓ reverted {r} file mutation{r > 1 ? "s" : ""} from the last turn</Text>);
+      return true;
+    }
+
+    case "/tasks": {
+      const rows = io.backgroundTasks();
+      if (!rows.length) { io.push(<Text dimColor color="#8a8a8a">  no background tasks</Text>); return true; }
+      io.push(
+        <Box flexDirection="column">
+          {rows.map((t) => (
+            <Text key={t.id}>
+              <Text color="#d97706">{t.id.padEnd(24)}</Text>
+              <Text color={t.status === "running" ? "#facc15" : t.status.startsWith("exit") ? "#f87171" : "#4ade80"}>
+                {t.status === "running" ? "● running" : "✓ done"}
+              </Text>
+              <Text dimColor color="#8a8a8a">  {t.cmd.slice(0, 48)}</Text>
+            </Text>
+          ))}
+        </Box>,
+      );
       return true;
     }
 
@@ -331,7 +361,8 @@ function descOf(cmd: string): string {
     "/sessions": "list sessions", "/resume": "resume a session", "/mcp": "manage MCP servers",
     "/skills": "list skills", "/plugin": "manage plugins", "/cost": "session cost",
     "/context": "context usage", "/config": "open config", "/doctor": "diagnose install",
-    "/init": "create GOAT.md", "/review": "review a PR", "/quit": "exit",
+    "/init": "create GOAT.md", "/review": "review a PR", "/undo": "revert last turn's file changes",
+    "/tasks": "list background bash tasks", "/quit": "exit",
   };
   return map[cmd] ?? "";
 }

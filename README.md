@@ -91,11 +91,22 @@ Claude Code's interaction model, GoatCode's engine:
 |---|---|
 | `Enter` | send · `Ctrl+C` cancel/exit · `Esc` interrupt |
 | `Shift+Tab` / `Ctrl+O` | cycle permission mode |
+| `Ctrl+T` | background task list |
 | `/model <p/id>` · `/models` · `/providers` | switch and browse |
 | `/auth <p> --key K` · `--oauth` | credentials in-chat |
 | `/mcp` · `/skills` · `/plugin` | extensions status |
 | `/new` `/clear` `/compact` `/sessions` `/resume <id>` | sessions |
+| `/undo` | revert the last turn's file changes (snapshot per mutation) |
+| `/tasks` | background bash jobs started with `bash background:true` |
 | `/cost` `/context` `/doctor` `/init` `/review` | diagnostics |
+
+**Plan mode is enforced, not decorative** — in `⏸ plan`, every mutating tool
+(write/edit/bash) is denied at dispatch with instructions to leave the mode.
+
+**Checkpoints** — each write/edit captures the before/after content, so
+`/undo` rewinds the whole last turn, including files the agent created
+(those get deleted). **Background tasks** — the agent can start long jobs
+and keep working; finished jobs are announced between turns.
 
 ## MCP servers
 
@@ -167,10 +178,13 @@ Tokens live in `~/.goatcode/credentials.json` and auto-refresh before expiry.
 ## Safety model
 
 - **Permission prompts** — write/edit/bash show the exact target; plan mode
-  blocks mutations; bypass is explicit and labeled in the status bar.
+  blocks mutations at the dispatcher; bypass is explicit and labeled in the
+  status bar.
 - **Path sandbox** — file tools and @refs reject anything outside the project
   root (membership check, not string prefix).
-- **Bounded output** — 128 KB per read, 32 KB per bash call.
+- **Undo checkpoints** — every write/edit snapshots before/after; `/undo`
+  rewinds the last turn, deleting files the agent created.
+- **Bounded output** — 128 KB per read, 32 KB per bash call, 500 KB per snapshot.
 
 ## Performance
 
@@ -178,7 +192,7 @@ Tokens live in `~/.goatcode/credentials.json` and auto-refresh before expiry.
 |---|---|
 | Cold start (`goat --version`) | **~0.6 s** (binary) |
 | Binary | single file, no runtime install |
-| Tests | 23 bun tests + live e2e (providers, MCP, skills, agent loop) |
+| Tests | 28 bun tests + live e2e (providers, MCP, skills, agent loop, undo) |
 
 ## Development
 

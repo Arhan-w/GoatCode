@@ -12,6 +12,7 @@ export interface SessionData {
   model: string;
   title: string;
   createdAt: number;
+  usage: { in: number; out: number };
   messages: Message[];
   compactedFrom: number;
 }
@@ -36,6 +37,7 @@ export class Session {
   createdAt: number;
   messages: Message[] = [];
   compactedFrom = 0;
+  usage = { in: 0, out: 0 };
 
   constructor(init: Partial<SessionData> & { id: string; cwd: string; model: string }) {
     this.id = init.id;
@@ -45,10 +47,17 @@ export class Session {
     this.createdAt = init.createdAt ?? Date.now() / 1000;
     this.messages = init.messages ?? [];
     this.compactedFrom = init.compactedFrom ?? 0;
+    this.usage = init.usage ?? { in: 0, out: 0 };
   }
 
   static new(cwd: string, model: string): Session {
     return new Session({ id: newId(), cwd, model });
+  }
+
+  static loadById(id: string): Session {
+    const s = new Session({ id, cwd: process.cwd(), model: "" });
+    s.load();
+    return s;
   }
 
   private path(): string {
@@ -63,7 +72,8 @@ export class Session {
     const lines = [
       JSON.stringify({
         meta: true, id: this.id, cwd: this.cwd, model: this.model,
-        title: this.title, createdAt: this.createdAt, compactedFrom: this.compactedFrom,
+        title: this.title, createdAt: this.createdAt,
+        compactedFrom: this.compactedFrom, usage: this.usage,
       }),
       ...this.messages.map((m) => JSON.stringify(m)),
     ];
@@ -79,17 +89,12 @@ export class Session {
       if (obj.meta) {
         this.cwd = obj.cwd; this.model = obj.model; this.title = obj.title ?? "";
         this.createdAt = obj.createdAt; this.compactedFrom = obj.compactedFrom ?? 0;
+        this.usage = obj.usage ?? { in: 0, out: 0 };
       } else {
         msgs.push(obj as Message);
       }
     }
     this.messages = msgs;
-  }
-
-  static loadById(id: string): Session {
-    const s = new Session({ id, cwd: process.cwd(), model: "" });
-    s.load();
-    return s;
   }
 
   /** The window sent to the provider: everything after the compaction cut. */

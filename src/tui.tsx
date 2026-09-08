@@ -125,9 +125,12 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [permSel, setPermSel] = useState(0);
   const [completions, setCompletions] = useState<string[]>([]);
   const [compSel, setCompSel] = useState(0);
+  const [thinkLine, setThinkLine] = useState("");
 
   const abortRef = useRef<AbortController | null>(null);
   const lineKey = useRef(0);
+  const toolsRef = useRef<ToolKit | null>(null);
+  const notifiedBg = useRef<Set<string>>(new Set());
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const cfgRef = useRef(cfg);
@@ -177,12 +180,16 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     try {
       const r = await resolve(cfgRef.current, registryRef.current);
       const m = modeRef.current;
-      const tools = new ToolKit(sessionRef.current.cwd, {
-        // acceptEdits auto-approves file edits, still asks for bash (Claude semantics)
-        permission: (t, a) =>
-          m === "acceptEdits" && (t === "write" || t === "edit") ? true : askPermission(t, a),
-        autoApprove: m === "bypass",
-      });
+      // one ToolKit per session so the undo stack + bg tasks survive turns
+      if (!toolsRef.current || toolsRef.current.root !== sessionRef.current.cwd)
+        toolsRef.current = new ToolKit(sessionRef.current.cwd);
+      const tools = toolsRef.current;
+      // plan mode: read-only — mutating tools are denied up front
+      tools.readonly = m === "plan";
+      tools.autoApprove = m === "bypass";
+      // acceptEdits auto-approves file edits, still asks for bash (Claude semantics)
+      tools.permission = (t, a) =>
+        m === "acceptEdits" && (t === "write" || t === "edit") ? true : askPermission(t, a);
       if (mcp)
         for (const spec of mcp.specs())
           tools.registerExternal({ spec, run: (args) => mcp.dispatch(spec.name, args) });
@@ -202,12 +209,14 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const runTurn = useCallback(async (text: string) => {
     const agent = await buildAgent();
     if (!agent) return;
+    agent.tools.beginCheckpoint(); // /undo reverts everything from here on
     setThinking(true);
     setStream("");
     setTokens(0);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     let acc = "";
+    let thinkAcc = "";
     const flush = () => {
       if (acc.trim()) push(<MdText text={acc.trimEnd()} />);
       acc = "";
@@ -220,6 +229,10 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           case "text":
             acc += ev.text;
             setStream(acc);
+            break;
+          case "thinking":
+            thinkAcc += ev.text;
+            setThinkLine(thinkAcc.split("\n").slice(-1)[0].slice(0, 120));
             break;
           case "tool_start": {
             flush();
@@ -259,8 +272,21 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     } finally {
       flush();
       setThinking(false);
+      setThinkLine("");
       abortRef.current = null;
       sessionRef.current.save();
+      // notify finished background tasks (Claude Code does this between turns)
+      for (const t of agent.tools.backgroundTasks()) {
+        if (t.status !== "running" && !notifiedBg.current.has(t.id)) {
+          notifiedBg.current.add(t.id);
+          push(
+            <Text>
+              <Text color={ACCENT}>⚡ </Text>
+              <Text dimColor color={DIM}>task {t.id} finished: {t.cmd.slice(0, 48)} — {t.status.split("\n")[0].slice(0, 80)}</Text>
+            </Text>,
+          );
+        }
+      }
     }
   }, [buildAgent, push]);
 
@@ -277,8 +303,13 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     if (text.startsWith("!")) {
       const cmd = text.slice(1).trim();
       (async () => {
-        const tk = new ToolKit(sessionRef.current.cwd, { autoApprove: true });
+        if (!toolsRef.current || toolsRef.current.root !== sessionRef.current.cwd)
+          toolsRef.current = new ToolKit(sessionRef.current.cwd);
+        const tk = toolsRef.current;
+        const wasAuto = tk.autoApprove, hadPerm = tk.permission;
+        tk.autoApprove = true; tk.permission = null;
         const r = await tk.dispatch("bash", { command: cmd });
+        tk.autoApprove = wasAuto; tk.permission = hadPerm;
         push(<Text color={r.ok ? GREEN : RED}>{r.output.slice(0, 4000)}</Text>);
       })();
       return;
@@ -319,6 +350,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         session: sessionRef.current,
         setSession: (s) => { sessionRef.current = s; setSession(s); },
         saveCfg: saveConfig, push, exit, mcp, skills,
+        undoTurn: () => toolsRef.current ? toolsRef.current.undoCheckpoint() : -1,
+        backgroundTasks: () => toolsRef.current?.backgroundTasks() ?? [],
         setMode: (m) => { setMode(m); setCfg((c) => ({ ...c, autoApprove: m === "bypass" })); },
         runTurn,
       };
@@ -357,6 +390,19 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     if (k.ctrl && ch === "d") { exit(); return; }
+    if (k.ctrl && ch === "t") {
+      const rows = toolsRef.current?.backgroundTasks() ?? [];
+      if (!rows.length) push(<Text dimColor color={DIM}>  no background tasks</Text>);
+      else for (const t of rows)
+        push(
+          <Text>
+            <Text color={ACCENT}>{t.id.padEnd(24)}</Text>
+            <Text color={t.status === "running" ? "#facc15" : GREEN}>{t.status === "running" ? "● running" : "✓ done"}</Text>
+            <Text dimColor color={DIM}>  {t.cmd.slice(0, 48)}</Text>
+          </Text>,
+        );
+      return;
+    }
     if (k.ctrl && ch === "o") { cycleMode(); return; }
     if (k.meta && ch === "m") { cycleMode(); return; } // Windows fallback for Shift+Tab
     if (k.escape && thinking) { abortRef.current?.abort(); return; }
@@ -407,6 +453,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
               {"  "}esc to interrupt
             </Text>
           </Text>
+          {thinkLine && !stream ? <Text dimColor color={DIM}>  {thinkLine}</Text> : null}
           {stream ? <MdText text={stream} /> : null}
         </Box>
       )}
@@ -444,6 +491,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           {mcp?.servers.size ? `${mcp.servers.size} mcp · ` : ""}
           {skills.length ? `${skills.length} skills · ` : ""}
           <Text color={ACCENT}>/help</Text>
+          <Text dimColor color={DIM}> · ctrl+t tasks · /undo</Text>
         </Text>
       </Box>
     </Box>
@@ -458,7 +506,8 @@ function descOf(cmd: string): string {
     "/sessions": "list sessions", "/resume": "resume a session", "/mcp": "manage MCP servers",
     "/skills": "list skills", "/plugin": "manage plugins", "/cost": "session cost",
     "/context": "context usage", "/config": "open config", "/doctor": "diagnose install",
-    "/init": "create GOAT.md", "/review": "review a PR", "/quit": "exit",
+    "/init": "create GOAT.md", "/review": "review a PR", "/undo": "revert last turn's file changes",
+    "/tasks": "list background bash tasks", "/quit": "exit",
   };
   return map[cmd] ?? "";
 }

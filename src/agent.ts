@@ -5,16 +5,17 @@
  */
 import { buildSystemPrompt } from "./system-prompt.ts";
 import type { ChatClient, Message, StreamEvent, ToolCall, ToolSpec } from "./llm.ts";
-import { Session } from "./session.ts";
+import { Session, summarize } from "./session.ts";
 import { ToolKit, type PermissionFn } from "./tools.ts";
 
 export const COMPACT_TRIGGER_CHARS = 220_000;
 
 export type AgentEvent =
   | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
   | { kind: "tool_start"; tool: string; args: Record<string, unknown> }
   | { kind: "tool_end"; tool: string; result: string; ok: boolean }
-  | { kind: "usage"; text: string }
+  | { kind: "usage"; text: string; usage?: { prompt: number; completion: number } }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
   | { kind: "error"; text: string }
   | { kind: "done" };
@@ -55,7 +56,7 @@ export class Agent {
     if (this.extraSystem) sys += "\n\n" + this.extraSystem;
     const msgs: Message[] = [{ role: "system", content: sys }];
     if (this.session.compactedFrom > 0)
-      msgs.push({ role: "system", content: "[previous conversation compacted]" });
+      msgs.push({ role: "system", content: summarize(this.session.messages.slice(0, this.session.compactedFrom)) });
     msgs.push(...ctx);
     return msgs;
   }
@@ -72,6 +73,7 @@ export class Agent {
       for await (const ev of this.streamOnce()) {
         if (ev.kind === "error") { yield ev; return; }
         if (ev.kind === "text") { assistantText += ev.text; yield ev; }
+        else if (ev.kind === "thinking") yield ev;
         else if (ev.kind === "usage") yield ev;
         else if (ev.kind === "tool_calls") toolCalls.push(...ev.toolCalls);
       }
@@ -107,7 +109,12 @@ export class Agent {
         { model: modelId(this.session.model), maxTokens: this.maxTokens, temperature: this.temperature },
       )) {
         if (ev.textDelta) yield { kind: "text", text: ev.textDelta };
-        else if (ev.usage) yield { kind: "usage", text: `${ev.usage.prompt}+${ev.usage.completion} tok` };
+        else if (ev.thinkingDelta) yield { kind: "thinking", text: ev.thinkingDelta };
+        else if (ev.usage) {
+          this.session.usage.in += ev.usage.prompt;
+          this.session.usage.out += ev.usage.completion;
+          yield { kind: "usage", text: `${ev.usage.prompt}+${ev.usage.completion} tok`, usage: ev.usage };
+        }
         else if (ev.toolCalls) yield { kind: "tool_calls", toolCalls: ev.toolCalls };
         else if (ev.error) yield { kind: "error", text: ev.error };
       }
@@ -125,23 +132,6 @@ export class Agent {
       if (cut < this.session.messages.length) this.session.compactedFrom = cut;
     }
   }
-}
-
-export function buildSystemPrompt(cwd: string): string {
-  return `You are GoatCode, a precise terminal coding agent running on the user's machine.
-
-Rules:
-- Act on the request; don't restate it. Show conclusions through tool results, not narration.
-- Prefer read/grep/glob before editing. Never guess file contents.
-- edit requires an exact unique old_string. If it fails, read the file and retry.
-- Keep bash commands non-interactive. Quote paths with spaces.
-- When done, give a 1-3 line summary: what changed, what to verify.
-- If the task is ambiguous and risky (deletes, pushes, money), ask first.
-
-Environment:
-- Working directory: ${cwd}
-- Platform: ${process.platform}
-`;
 }
 
 export function modelId(sessionModel: string): string {
