@@ -16,8 +16,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 PORT = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 31999
 
 ANSWER = (
-    "`t.txt` contains **hello from the goat pen** — 1 line, no surprises. "
-    "I can rename it, expand it, or delete it, your call."
+    "`t.txt` contains **hello from the goat pen** · 1 line, no surprises. "
+    "I can rename it, expand it, or delete it — your call."
 )
 
 

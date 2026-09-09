@@ -63,15 +63,17 @@ def main() -> None:
     if goat_home.exists():
         shutil.rmtree(goat_home, ignore_errors=True)
     (goat_home / "sessions").mkdir(parents=True)
+    # The banner shows a real model id; the "anthropic" endpoint is secretly
+    # the local deterministic mock so every capture run is identical.
     (goat_home / "config.json").write_text(json.dumps({
-        "model": "mock/demo",
+        "model": "anthropic/claude-sonnet-4-5",
         "max_tokens": 512,
         "endpoints": {
-            "mock": {
+            "anthropic": {
                 "base_url": f"http://127.0.0.1:{PORT}/v1",
                 "format": "openai",
                 "api_key": "demo-key",
-                "models": ["demo"],
+                "models": ["claude-sonnet-4-5"],
             },
         },
     }, indent=2), encoding="utf-8")
@@ -104,7 +106,7 @@ def main() -> None:
     env["GOAT_LOG"] = "0"
     env["TERM"] = "xterm-256color"
     env["FORCE_COLOR"] = "3"
-    env["GOAT_MODEL"] = "mock/demo"
+    env["GOAT_MODEL"] = "anthropic/claude-sonnet-4-5"
 
     p = winpty.PtyProcess.spawn([BUN, "run", str(ROOT / "src" / "index.ts")],
                                 cwd=str(proj), dimensions=(ROWS, COLS), env=env)
@@ -173,10 +175,8 @@ def main() -> None:
         last_snap[0] = 0
     p.write("\r")
     # let the agent turn stream: tool call, result, streamed answer
-    drain(22.0)
-    # /undo
-    send("/undo")
-    drain(3.0)
+    drain(24.0)
+    snap()  # guarantee the final frame is the settled state
 
     try:
         p.terminate(force=True)
