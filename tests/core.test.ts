@@ -894,14 +894,14 @@ describe("retry", () => {
         // hang until the agent's deadline aborts us (never yields content)
         await new Promise<void>((_, rej) => {
           if (opts.signal?.aborted) return rej(new Error("aborted"));
-          opts.signal?.addEventListener?.("abort", () => rej(new Error("request timed out after 0.03s")));
+          opts.signal?.addEventListener?.("abort", () => rej(new Error("request timed out after 0.15s")));
         });
         yield { textDelta: "never" };
       },
     } as any;
     const agent = new Agent({
       client, session: Session.new(home, "mock/m"), tools: new ToolKit(home, { autoApprove: true }),
-      maxTokens: 10, temperature: null, maxSteps: 2, retryBaseMs: 10, requestTimeoutMs: 30,
+      maxTokens: 10, temperature: null, maxSteps: 2, retryBaseMs: 20, requestTimeoutMs: 150,
     });
     const kinds: string[] = [];
     let lastReason = "";
