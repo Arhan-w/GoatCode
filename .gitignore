@@ -14,3 +14,5 @@ scripts/pty-vision.txt
 .goatdemo-home/
 .goatdemo-proj/
 docs/assets/frames/
+npm-package/bin/goat.exe
+npm-package/*.tgz
