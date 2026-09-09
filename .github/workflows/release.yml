@@ -4,6 +4,9 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: write   # create the release + upload assets with GITHUB_TOKEN
+
 jobs:
   build:
     strategy:
