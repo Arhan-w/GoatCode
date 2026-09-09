@@ -36,6 +36,23 @@ markdown under a live spinner, sandboxed tools with permission prompts,
 
 ## Install
 
+**One command — installs `goat` globally on PATH (Windows, Linux, macOS):**
+
+```bash
+# Windows (PowerShell)
+powershell -c "irm https://raw.githubusercontent.com/Arhan-w/GoatCode/v2-typescript/install.ps1 | iex"
+
+# Linux / macOS / Git-Bash (curl)
+curl -fsSL https://raw.githubusercontent.com/Arhan-w/GoatCode/v2-typescript/install.sh | bash
+```
+
+The installer grabs the prebuilt release binary for your platform, verifies
+it, and puts it on PATH. Re-run it any time to upgrade. No runtime, no
+interpreter — one file.
+
+<details>
+<summary>Build from source instead</summary>
+
 ```bash
 # with Bun (1.1+): run from source
 git clone https://github.com/Arhan-w/GoatCode && cd GoatCode
@@ -43,10 +60,9 @@ bun install
 
 # or build the standalone binary (~100 MB, zero dependencies)
 bun build src/index.ts --compile --outfile goat
-
-# or grab the latest release and put it on your PATH — one file, nothing else
-# windows:   copy goat.exe D:\bin   ·   PATH += D:\bin
 ```
+
+</details>
 
 Prebuilt binaries: see [Releases](../../releases).
 

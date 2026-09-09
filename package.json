@@ -5,6 +5,10 @@
   "module": "src/index.ts",
   "type": "module",
   "bin": { "goat": "./src/index.ts" },
+  "files": ["src", "README.md", "LICENSE"],
+  "engines": { "bun": ">=1.1" },
+  "repository": { "type": "git", "url": "git+https://github.com/Arhan-w/GoatCode.git" },
+  "keywords": ["cli", "ai", "coding-agent", "agent", "terminal", "mcp", "bun", "llm"],
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
