@@ -12,7 +12,19 @@ markdown under a live spinner, sandboxed tools with permission prompts,
 
 ![GoatCode live](docs/assets/demo.gif)
 
-[Install](#install) · [Quick start](#quick-start) · [The TUI](#the-tui) ·
+### Install
+
+```bash
+npm install -g goatcode-cli
+```
+
+<sub>No npm? One line on any OS:<br>
+<b>Windows (PowerShell):</b> <code>powershell -c "irm https://raw.githubusercontent.com/Arhan-w/GoatCode/v2-typescript/install.ps1 | iex"</code><br>
+<b>Linux / macOS / Git-Bash:</b> <code>curl -fsSL https://raw.githubusercontent.com/Arhan-w/GoatCode/v2-typescript/install.sh | bash</code></sub>
+
+Then run `goat auth` and start with `goat`. [Full install docs ↓](#install)
+
+[Quick start](#quick-start) · [The TUI](#the-tui) ·
 [Desktop control](#desktop-control) · [MCP](#mcp-servers) · [Skills](#skills) ·
 [Providers](#providers) ·
 [OAuth](#subscription-oauth)
