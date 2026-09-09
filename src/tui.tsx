@@ -150,6 +150,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     return Session.new(process.cwd(), initialCfg.model);
   });
   const [mcp, setMcp] = useState<McpClient | null>(null);
+  const [mcpErrors, setMcpErrors] = useState<string[]>([]);
   const [skills, setSkills] = useState<SkillDef[]>([]);
 
   const [mode, setMode] = useState<Mode>(initialCfg.autoApprove ? "bypass" : "default");
@@ -192,6 +193,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     (async () => {
       try {
         const m = await loadMcpFromConfig({ mcpServers: cfgRef.current.mcpServers });
+        m.onError = (msg) => setMcpErrors((prev) => [...prev, msg]);
         setMcp(m);
         if (m.servers.size)
           push(<Text dimColor color={DIM}>  ⚡ {m.servers.size} MCP server(s) connected</Text>);
@@ -576,6 +578,14 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
 
       {todos.length > 0 && <PlanPanel todos={todos} />}
 
+      {mcpErrors.length > 0 && (
+        <Box flexDirection="column" paddingLeft={1} marginBottom={0}>
+          {mcpErrors.map((e, i) => (
+            <Text key={i} color="#facc15">  ⚠ {e}</Text>
+          ))}
+        </Box>
+      )}
+
       <Box flexDirection="column">
         <Box borderStyle="round" borderColor={thinking ? BORDER : ACCENT} paddingLeft={1}>
           <Text color={ACCENT} bold>❯ </Text>
@@ -642,19 +652,22 @@ function PlanPanel({ todos }: { todos: Todo[] }) {
 }
 
 function Welcome({ cfg, cwd }: { cfg: GoatConfig; cwd: string }) {
-  const logo = [
-    " ██████╗  ██████╗  █████╗ ████████╗",
-    "██╔════╝ ██╔═══██╗██╔══██╗╚══██╔══╝",
-    "██║  ███╗██║   ██║███████║   ██║",
-    "██║   ██║██║   ██║██╔══██║   ██║",
-    "╚██████╔╝╚██████╔╝██║  ██║   ██║",
-    " ╚═════╝  ╚═════╝ ╚═╝  ╚═╝   ╚═╝",
+  const goat = [
+    "███            ███",
+    "███▄          ▄███",
+    "▀███▄ ▄▄▄▄▄▄ ▄███▀",
+    "  ▀████▀▀▀▀████▀",
+    " ▄▄████▄  ▄████▄▄",
+    "   ██▀▀▀  ▀▀▀██",
+    "   ▀██▄ ▀▀ ▄██▀",
+    "     ▀██████▀",
+    "        ▄▀▄",
   ];
   return (
     <Box flexDirection="column" marginBottom={1}>
-      {logo.map((l, i) => <Text key={i} color={ACCENT}>{l}</Text>)}
       <Text>
-        <Text bold color={ACCENT}>GoatCode</Text>
+        <Text color={ACCENT}>{goat.map((l, i) => l + "\n").join("")}</Text>
+        <Text color={ACCENT} bold>  GoatCode</Text>
         <Text dimColor color={DIM}>  v2.0  ·  every provider, one terminal</Text>
       </Text>
       <Text dimColor color={DIM}>  model {cfg.model}</Text>

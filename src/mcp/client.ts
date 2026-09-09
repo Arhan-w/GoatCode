@@ -26,13 +26,15 @@ export interface McpServerEntry {
 export class McpClient {
   servers = new Map<string, McpServerEntry>();
   private _loaded = false;
+  /** Called for every failed server (config or connection) — TUI renders these. */
+  onError?: (msg: string) => void;
 
   async load(cfg: { mcpServers: Record<string, any> }): Promise<McpServerEntry[]> {
     const entries: McpServerEntry[] = [];
     for (const [name, raw] of Object.entries(cfg.mcpServers ?? {})) {
       const parsed = McpServerConfigSchema.safeParse(raw);
       if (!parsed.success) {
-        console.warn(`goat: MCP server '${name}' config invalid, skipping`);
+        this.onError?.(`MCP server '${name}' config invalid — skipped`);
         continue;
       }
       const entry = await this.add(name, parsed.data);
@@ -61,7 +63,7 @@ export class McpClient {
     try {
       await client.connect(transport);
     } catch (e: any) {
-      console.warn(`goat: MCP server '${name}' connection failed: ${e?.message}`);
+      this.onError?.(`MCP server '${name}' connection failed: ${e?.message}`);
       return null;
     }
     const tools = new Map();
