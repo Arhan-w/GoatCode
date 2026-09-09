@@ -1005,6 +1005,7 @@ describe("compact command", () => {
       setCfg: () => {}, registry: null as any, setSession: () => {}, saveCfg: () => {},
       exit: () => {}, mcp: null, skills: [], undoTurn: () => 0, backgroundTasks: () => [],
       setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub", reloadPlugins: () => 0,
+      clearAuthBanner: () => {},
     };
     expect(runSlash("/compact", io)).toBe(true);
     expect(s.compactedFrom).toBe(0); // delegated — the stub doesn't mutate

@@ -176,6 +176,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
 
   const [mode, setMode] = useState<Mode>(initialCfg.autoApprove ? "bypass" : "default");
   const [input, setInput] = useState("");
+  const [authBanner, setAuthBanner] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
   const [lines, setLines] = useState<ReactNode[]>([]);
@@ -209,10 +210,22 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     setLines((prev) => [...prev, <Box key={lineKey.current++}>{node}</Box>]);
   }, []);
 
-  // boot: welcome + async init of mcp/skills
+  // boot: welcome + async init of mcp/skills + a live auth probe so a
+  // misconfigured install shows a banner instead of a silent dead shell
   useEffect(() => {
     push(<Welcome cfg={cfgRef.current} cwd={sessionRef.current.cwd} />);
     (async () => {
+      try {
+        const { resolve, AuthRequired, UnknownProvider } = await import("./runtime.ts");
+        await resolve(cfgRef.current, registryRef.current);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("needs credentials")) {
+          setAuthBanner(msg);
+        } else {
+          push(<Text color="#f87171">{msg}</Text>);
+        }
+      }
       try {
         const m = await loadMcpFromConfig({ mcpServers: cfgRef.current.mcpServers });
         m.onError = (msg) => { setMcpErrors((prev) => [...prev, msg]); log("mcp", msg); };
@@ -371,6 +384,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       setThinking(false);
       setThinkLine("");
       abortRef.current = null;
+      setAuthBanner(null); // a successful turn means credentials are fine
       sessionRef.current.save();
       // notify finished background tasks (Claude Code does this between turns)
       for (const t of agent.tools.backgroundTasks()) {
@@ -472,6 +486,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         session: sessionRef.current,
         setSession: (s) => { sessionRef.current = s; setSession(s); },
         saveCfg: saveConfig, push, exit, mcp, skills,
+        clearAuthBanner: () => setAuthBanner(null),
         undoTurn: () => toolsRef.current ? toolsRef.current.undoCheckpoint() : null,
         backgroundTasks: () => toolsRef.current?.backgroundTasks() ?? [],
         setMode: (m) => { setMode(m); setCfg((c) => ({ ...c, autoApprove: m === "bypass" })); },
@@ -637,6 +652,20 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     <Box flexDirection="column" width="100%">
       <Box flexDirection="column">{lines}</Box>
 
+      {authBanner && (
+        <Box flexDirection="column" borderStyle="round" borderColor="#facc15" paddingX={1} marginY={1}>
+          <Text color="#facc15" bold>⚠  GoatCode is installed but not ready yet</Text>
+          <Text dimColor color={DIM}>{authBanner}</Text>
+          <Text dimColor color={DIM}>  then type a message and hit Enter, or run /auth to fix it now</Text>
+        </Box>
+      )}
+      {authBanner && (
+        <Box flexDirection="column" borderStyle="round" borderColor="#facc15" paddingX={1} marginY={1}>
+          <Text color="#facc15" bold>⚠ GoatCode is installed but not ready yet</Text>
+          <Text dimColor color={DIM}>{authBanner}</Text>
+          <Text dimColor color={DIM}>  then type a message and hit Enter, or run /auth to fix it now</Text>
+        </Box>
+      )}
       {thinking && (
         <Box flexDirection="column">
           <Text>

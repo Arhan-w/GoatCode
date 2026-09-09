@@ -40,6 +40,8 @@ export interface SlashIO {
   backgroundTasks(): { id: string; cmd: string; status: string; started: number }[];
   setMode(mode: "default" | "acceptEdits" | "plan" | "bypass"): void;
   runTurn(text: string | import("./llm.ts").ContentPart[]): Promise<void>;
+  /** Clear the boot-time auth banner once credentials are set. */
+  clearAuthBanner(): void;
   /** Summarize old context with the model; resolves to a status line. */
   compactNow(): Promise<string>;
   /** Re-scan plugin dirs; returns total active skills+commands. */
@@ -113,8 +115,14 @@ export function runSlash(line: string, io: SlashIO): boolean {
     }
 
     case "/auth": {
+      if (arg === "--list" || (arg === "" && rest.includes("--list"))) {
+        io.push(<Text>OAuth providers (run /auth &lt;id&gt; --oauth):</Text>);
+        for (const [k, meta] of Object.entries(OAUTH_PROVIDERS))
+          io.push(<Text key={k}><Text color="#a855f7">{k.padEnd(16)}</Text><Text dimColor color="#8a8a8a">{meta.label}</Text></Text>);
+        return true;
+      }
       if (!arg) {
-        io.push(<Text>usage: /auth &lt;provider&gt; --key &lt;K&gt; | --oauth</Text>);
+        io.push(<Text>usage: /auth &lt;provider&gt; --key &lt;K&gt; | --oauth | --list</Text>);
         io.push(<Text dimColor color="#8a8a8a">  oauth: {Object.keys(OAUTH_PROVIDERS).join(", ")}</Text>);
         return true;
       }
@@ -124,6 +132,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
         const key = rest[idx];
         if (!key) { io.push(<Text color="#f87171">usage: /auth &lt;provider&gt; --key &lt;KEY&gt;</Text>); return true; }
         io.registry.store.put(pid, { kind: "api_key", apiKey: key, expiresAt: 0 });
+        io.clearAuthBanner();
         io.push(<Text color="#4ade80">✓ stored key for {pid}</Text>);
         return true;
       }
@@ -460,6 +469,7 @@ async function oauthLogin(pid: string, io: SlashIO): Promise<void> {
     else if (flow === "import") cred = await loginImport(pid, io2);
     else cred = await loginOauth(pid, io2);
     io.registry.store.put(pid, cred);
+    io.clearAuthBanner();
     io.push(<Text color="#4ade80">✓ logged in to {pid}</Text>);
     io.push(<Text dimColor color="#8a8a8a">  try: /model {pid}/{meta.model_prefix}-…</Text>);
   } catch (e: any) {

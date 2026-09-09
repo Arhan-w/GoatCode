@@ -31,7 +31,7 @@ export function statusInput(
     cwd: session.cwd,
     model: { id: modelId, display_name: modelId },
     workspace: { current_dir: session.cwd, project_dir: session.cwd },
-    version: "2.1.1",
+    version: "2.1.2",
     output_style: { name: style ?? "default" },
     cost: { total_tokens_in: session.usage.in, total_tokens_out: session.usage.out },
     context_window: {

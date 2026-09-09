@@ -60,7 +60,7 @@ async function main(): Promise<number> {
   };
   const has = (name: string): boolean => argv.includes(name);
 
-  if (has("--version") || has("-V")) { console.log("goatcode 2.1.1"); return 0; }
+  if (has("--version") || has("-V")) { console.log("goatcode 2.1.2"); return 0; }
   const m = flag("-m") ?? flag("--model");
   if (m) { cfg.model = m; splitModel(cfg); }
   if (has("--auto")) cfg.autoApprove = true;
