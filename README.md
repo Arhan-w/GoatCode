@@ -75,7 +75,7 @@ One-shot for scripts and CI:
 
 ```bash
 goat -p "summarize what @setup.py does" -q
-goat --auto -m freellmapi/auto -p "run the tests and fix failures"
+goat --auto -m provider/model -p "run the tests and fix failures"
 goat -c    # resume the most recent session
 ```
 
