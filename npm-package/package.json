@@ -1,0 +1,20 @@
+{
+  "name": "goatcode",
+  "version": "2.1.2",
+  "description": "GoatCode — open-source terminal coding agent. Any provider (183), your subscriptions (Claude/ChatGPT/Gemini/Copilot OAuth), MCP, skills, built-in desktop control. One binary.",
+  "keywords": ["ai", "cli", "coding-agent", "agent", "terminal", "llm", "mcp", "anthropic", "openai", "gemini", "copilot", "developer-tools", "skills", "automation"],
+  "license": "MIT",
+  "author": "Arhan (Goated)",
+  "homepage": "https://github.com/Arhan-w/GoatCode#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/Arhan-w/GoatCode.git" },
+  "bugs": { "url": "https://github.com/Arhan-w/GoatCode/issues" },
+  "bin": { "goat": "bin/goat.js" },
+  "files": ["bin/goat.js", "scripts/install-binary.js", "README.md"],
+  "engines": { "node": ">=16" },
+  "os": ["darwin", "linux", "win32"],
+  "cpu": ["x64", "arm64"],
+  "scripts": {
+    "postinstall": "node scripts/install-binary.js",
+    "test": "node bin/goat.js --version"
+  }
+}
