@@ -2,6 +2,17 @@
 
 All notable changes to GoatCode. Versions match git tags and npm releases.
 
+## [2.1.3] - 2026-09-10
+### Added
+- **Interactive `goat auth`** — running `goat auth` with no arguments now
+  walks you through provider → method (OAuth / paste key) instead of printing
+  a usage line. First-run friction is the #1 adoption killer.
+- `npm install -g goatcode` — the npm wrapper ships in `npm-package/`:
+  postinstall downloads the platform binary from GitHub releases (with an
+  exact-version URL first, `latest` as fallback), and the launcher self-heals
+  if scripts were skipped.
+- CHANGELOG.md, GitHub social preview card, release-procedure docs.
+
 ## [2.1.2] - 2026-09-10
 ### Added
 - First-run auth banner — a credential-less install now says exactly what to
