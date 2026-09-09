@@ -23,9 +23,10 @@ import { loadSkills, loadSkillBody, type SkillDef } from "./skills/loader.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import { buildExtraSystem, loadOutputStyle } from "./context.ts";
 import { loadMcpFromConfig, type McpClient } from "./mcp/client.ts";
-import { ToolKit, IMAGE_TYPES, MAX_IMAGE_BYTES } from "./tools.ts";
+import { ToolKit, IMAGE_TYPES, MAX_IMAGE_BYTES, sniffImage } from "./tools.ts";
 import { runStatusLine, statusInput } from "./statusline.ts";
-import { contentChars } from "./llm.ts";
+import { log } from "./logger.ts";
+import { contentChars, estimateTokens } from "./llm.ts";
 import type { ContentPart } from "./llm.ts";
 import type { Todo } from "./tools.ts";
 
@@ -102,9 +103,10 @@ export function buildUserContent(text: string, cwd: string, push?: (n: ReactNode
       if (!existsSync(abs)) { push?.(<Text color={RED}>  ⚠ @{ref} not found</Text>); return `${pre}@${ref}`; }
       const size = statSync(abs).size;
       if (size > MAX_IMAGE_BYTES) { push?.(<Text color={RED}>  ⚠ @{ref} too large ({size} bytes)</Text>); return `${pre}@${ref}`; }
-      const ext = ref.slice(ref.lastIndexOf(".")).toLowerCase();
-      const mediaType = IMAGE_TYPES[ext] ?? "image/png";
-      images.push({ type: "image", data: readFileSync(abs).toString("base64"), mediaType });
+      const buf = readFileSync(abs);
+      const mediaType = sniffImage(buf); // extension is a hint; magic bytes decide
+      if (!mediaType) { push?.(<Text color={RED}>  ⚠ @{ref} isn't a real png/jpeg/gif/webp file</Text>); return `${pre}@${ref}`; }
+      images.push({ type: "image", data: buf.toString("base64"), mediaType });
       return `${pre}[image: ${ref}]`;
     } catch {
       return `${pre}@${ref}`;
@@ -142,6 +144,23 @@ export async function run(cfg: GoatConfig = loadConfig(), resume?: string): Prom
 function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }) {
   const { exit } = useApp();
   const [cfg, setCfg] = useState(initialCfg);
+  log("boot", `goat ${cfg.model} cwd=${resume ?? process.cwd()}`);
+  const mcpRef = useRef<McpClient | null>(null);
+
+  // Production: shutdown MCP cleanly and save on exit, SIGTERM, SIGHUP
+  useEffect(() => {
+    const cleanup = async () => {
+      try { await mcpRef.current?.shutdown(); } catch { /* */ }
+      try { sessionRef.current.save(); } catch { /* */ }
+    };
+    const onSig = () => { cleanup().then(() => exit()); };
+    process.on("SIGTERM", onSig);
+    process.on("SIGHUP", onSig);
+    return () => {
+      process.off("SIGTERM", onSig);
+      process.off("SIGHUP", onSig);
+    };
+  }, [exit]);
   const registryRef = useRef(new ProviderRegistry(initialCfg.endpoints));
   const [session, setSession] = useState<Session>(() => {
     if (resume) {
@@ -151,6 +170,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   });
   const [mcp, setMcp] = useState<McpClient | null>(null);
   const [mcpErrors, setMcpErrors] = useState<string[]>([]);
+  mcpRef.current = mcp;
   const [skills, setSkills] = useState<SkillDef[]>([]);
 
   const [mode, setMode] = useState<Mode>(initialCfg.autoApprove ? "bypass" : "default");
@@ -193,7 +213,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     (async () => {
       try {
         const m = await loadMcpFromConfig({ mcpServers: cfgRef.current.mcpServers });
-        m.onError = (msg) => setMcpErrors((prev) => [...prev, msg]);
+        m.onError = (msg) => { setMcpErrors((prev) => [...prev, msg]); log("mcp", msg); };
         setMcp(m);
         if (m.servers.size)
           push(<Text dimColor color={DIM}>  ⚡ {m.servers.size} MCP server(s) connected</Text>);
@@ -258,8 +278,10 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           loadOutputStyle(cfgRef.current.outputStyle)].filter(Boolean).join("\n\n"),
       });
     } catch (e) {
-      if (e instanceof ResolveError) push(<Text color={RED}>{String(e.message)}</Text>);
-      else push(<Text color={RED}>{String((e as Error).message)}</Text>);
+      const msg = e instanceof ResolveError ? e.message : String((e as Error).message);
+      log("resolve", msg);
+      if (e instanceof ResolveError) push(<Text color={RED}>{msg}</Text>);
+      else push(<Text color={RED}>{msg}</Text>);
       return null;
     }
   }, [askPermission, mcp, push]);
@@ -333,6 +355,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
             break;
           case "error":
             flush();
+            log("agent", ev.text);
             push(<Text color={RED}>✗ {ev.text}</Text>);
             break;
         }
@@ -430,6 +453,18 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         undoTurn: () => toolsRef.current ? toolsRef.current.undoCheckpoint() : -1,
         backgroundTasks: () => toolsRef.current?.backgroundTasks() ?? [],
         setMode: (m) => { setMode(m); setCfg((c) => ({ ...c, autoApprove: m === "bypass" })); },
+        reloadPlugins: () => {
+          const pl = loadPlugins(cfgRef.current.pluginDirs.map((d) => resolvePath(process.cwd(), d)));
+          const fromPlugins = pluginSkills(pl);
+          const native = loadSkills(
+            join(appDir(), "skills"),
+            join(process.cwd(), "skills"),
+            join(process.cwd(), ".claude", "skills"),
+          );
+          const names = new Set(native.map((s) => s.name));
+          setSkills([...native, ...fromPlugins.filter((s) => !names.has(s.name))]);
+          return native.length + fromPlugins.length;
+        },
         runTurn,
         compactNow: async () => {
           const agent = await buildAgent();

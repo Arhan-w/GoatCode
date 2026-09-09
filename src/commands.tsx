@@ -3,15 +3,15 @@
  * Each command gets a SlashIO context; returns true if handled.
  */
 import type { ReactNode } from "react";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GoatConfig } from "./config.ts";
-import { appDir, saveConfig, splitModel } from "./config.ts";
+import { appDir, configPath, saveConfig, splitModel } from "./config.ts";
 import type { ProviderRegistry } from "./providers.ts";
 import { CredentialStore, OAUTH_PROVIDERS, type Credential } from "./providers.ts";
 import { Session, listSessions } from "./session.ts";
 import { costUsd, fmtUsd } from "./pricing.ts";
-import { contentChars } from "./llm.ts";
+import { contentChars, estimateTokens, textOf } from "./llm.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import type { McpClient } from "./mcp/client.ts";
@@ -19,7 +19,7 @@ import type { SkillDef } from "./skills/loader.ts";
 
 export const SLASH_COMMANDS = [
   "/help", "/model", "/models", "/providers", "/auth", "/logout",
-  "/new", "/clear", "/compact", "/sessions", "/resume", "/rename",
+  "/new", "/clear", "/compact", "/sessions", "/resume", "/rename", "/export",
   "/mcp", "/skills", "/plugin", "/cost", "/usage", "/context", "/config",
   "/status", "/memory", "/doctor", "/init", "/review", "/undo", "/tasks", "/quit",
 ];
@@ -42,6 +42,8 @@ export interface SlashIO {
   runTurn(text: string | import("./llm.ts").ContentPart[]): Promise<void>;
   /** Summarize old context with the model; resolves to a status line. */
   compactNow(): Promise<string>;
+  /** Re-scan plugin dirs; returns total active skills+commands. */
+  reloadPlugins(): number;
 }
 
 export function runSlash(line: string, io: SlashIO): boolean {
@@ -230,6 +232,11 @@ export function runSlash(line: string, io: SlashIO): boolean {
     }
 
     case "/plugin": {
+      if (arg.toLowerCase() === "reload") {
+        const n = io.reloadPlugins();
+        io.push(<Text color="#4ade80">✓ plugins reloaded — {n} skill/command(s) active</Text>);
+        return true;
+      }
       const dirs = io.cfg.pluginDirs ?? [];
       if (!dirs.length) {
         io.push(<Text dimColor color="#8a8a8a">  no plugin dirs — list dirs under "plugins" in config.json (commands/&lt;name&gt;.md + skills/&lt;name&gt;/SKILL.md)</Text>);
@@ -255,7 +262,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
 
     case "/cost": {
       const u = io.session.usage;
-      const est = Math.round(io.session.messages.reduce((s, m) => s + contentChars(m.content), 0) / 4);
+      const est = io.session.messages.reduce((s, m) => s + estimateTokens(m.content), 0);
       io.push(<Text>  session: {io.session.messages.length} messages · {u.in} in / {u.out} out tokens{u.in ? "" : " (no usage reported yet)"} · est context ~{est} · model {io.cfg.model}</Text>);
       const cost = costUsd(io.cfg.model, u.in, u.out);
       if (cost != null)
@@ -267,14 +274,20 @@ export function runSlash(line: string, io: SlashIO): boolean {
 
     case "/context": {
       const ctx = io.session.context();
-      const chars = ctx.reduce((s, m) => s + contentChars(m.content), 0);
-      io.push(<Text>  context window: {ctx.length} messages · ~{Math.round(chars / 4)} tokens</Text>);
+      const est = ctx.reduce((s, m) => s + estimateTokens(m.content), 0);
+      const imgs = ctx.reduce((s, m) => s + (typeof m.content === "object" ? m.content.filter((p) => p.type === "image").length : 0), 0);
+      io.push(<Text>  context window: {ctx.length} messages · ~{est.toLocaleString()} tokens{imgs ? ` · ${imgs} image(s)` : ""} (estimate)</Text>);
+      if (io.session.usage.in)
+        io.push(<Text dimColor color="#8a8a8a">  last measured from API: {io.session.usage.in.toLocaleString()} prompt / {io.session.usage.out.toLocaleString()} completion</Text>);
       return true;
     }
 
-    case "/config":
-      io.push(<Text>  config: {io.cfg.model} · max_tokens {io.cfg.maxTokens} · auto_approve {String(io.cfg.autoApprove)}</Text>);
+    case "/config": {
+      io.push(<Text>  file:   {configPath()}</Text>);
+      io.push(<Text>  model:  {io.cfg.model} · max_tokens {io.cfg.maxTokens} · auto_approve {String(io.cfg.autoApprove)}</Text>);
+      io.push(<Text>  edits:  change the JSON directly, or use /model · /auth · /mcp (they save for you)</Text>);
       return true;
+    }
 
     case "/doctor": {
       io.push(<Text>  ✓ bun {Bun.version}</Text>);
@@ -283,6 +296,31 @@ export function runSlash(line: string, io: SlashIO): boolean {
       io.push(<Text>  ✓ {creds} providers with credentials</Text>);
       io.push(<Text>  {io.mcp && io.mcp.servers.size ? `✓ ${io.mcp.servers.size} MCP servers` : "· no MCP servers"}</Text>);
       io.push(<Text>  {io.skills.length ? `✓ ${io.skills.length} skills` : "· no skills"}</Text>);
+      // live HEAD probe on the active provider (catches dead base URLs)
+      const p = io.registry.get(io.cfg.provider);
+      if (!p) io.push(<Text color="#f87171">✗ provider '{io.cfg.provider}' not in catalog</Text>);
+      else if (!io.registry.resolveCredential(p.id)) io.push(<Text color="#f87171">✗ {p.id}: no credentials — /auth {p.id} --key …</Text>);
+      else {
+        io.push(<Text dimColor color="#8a8a8a">  probing {p.baseUrl} …</Text>);
+        void probeProvider(p.baseUrl).then((r) =>
+          io.push(r.ok
+            ? <Text color="#4ade80">✓ {p.id} reachable ({r.ms}ms, HTTP {r.status})</Text>
+            : <Text color="#f87171">✗ {p.id} unreachable: {r.error ?? `HTTP ${r.status}`}</Text>),
+        );
+      }
+      return true;
+    }
+
+    case "/export": {
+      const fmt = ["md", "html"].includes(arg.toLowerCase()) ? arg.toLowerCase() : "md";
+      const file = rest.find((r) => !["md", "html"].includes(r.toLowerCase()))
+        ?? join(io.session.cwd, `goat-session-${io.session.id}.${fmt}`);
+      try {
+        writeFileSync(file, renderTranscript(io.session, fmt), "utf8");
+        io.push(<Text color="#4ade80">✓ exported {io.session.messages.length} messages → {file}</Text>);
+      } catch (e: any) {
+        io.push(<Text color="#f87171">✗ export failed: {e?.message ?? e}</Text>);
+      }
       return true;
     }
 
@@ -433,6 +471,43 @@ function fmtShort(f: string): string {
   return { openai: "oai", claude: "ant", "openai-responses": "rsp", gemini: "gem" }[f] ?? f;
 }
 
+/** Live HEAD probe of a provider base URL — used by /doctor. */
+async function probeProvider(baseUrl: string): Promise<{ ok: boolean; ms: number; status?: number; error?: string }> {
+  const t0 = Date.now();
+  try {
+    const res = await fetch(baseUrl, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(8000) });
+    return { ok: res.ok, ms: Date.now() - t0, status: res.status };
+  } catch (e: any) {
+    return { ok: false, ms: Date.now() - t0, error: String(e?.message ?? e).slice(0, 120) };
+  }
+}
+
+/** Render the conversation to markdown or HTML for /export. */
+function renderTranscript(session: Session, fmt: string): string {
+  const title = session.title || session.id;
+  const head = fmt === "html"
+    ? `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>body{font:14px/1.5 ui-monospace,monospace;max-width:880px;margin:2em auto;padding:0 1em;color:#111}
+pre{background:#f4f4f4;padding:1em;overflow:auto}.user{color:#0066cc}.tool{color:#888;font-size:12px}
+.assistant{color:#008800}h1{border-bottom:1px solid #ccc}</style></head><body>`
+    : `# ${title}\n\n`;
+  const tail = fmt === "html" ? "</body></html>" : "";
+  const body = session.messages.map((m) => {
+    const role = m.role;
+    const text = textOf(m.content);
+    const tools = m.toolCalls?.map((tc) => `- ${tc.name}(${JSON.stringify(tc.arguments).slice(0, 120)})`).join("\n");
+    if (fmt === "html") {
+      return `<pre class="${role}"><b>[${role}]</b>\n${escapeHtml(text)}${tools ? `\n${escapeHtml(tools)}` : ""}</pre>`;
+    }
+    return `[${role}] ${text.split("\n").map((l) => "  " + l).join("\n")}${tools ? `\n${tools}` : ""}`;
+  }).join("\n\n");
+  return head + body + tail;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+}
+
 /** Current git branch (best-effort) for /status. */
 function gitBranch(cwd: string): string {
   try {
@@ -467,9 +542,9 @@ export const COMMAND_DESC: Record<string, string> = {
   "/new": "new session", "/clear": "clear context", "/compact": "fold old context into a digest",
   "/sessions": "list sessions", "/resume": "resume a session", "/mcp": "manage MCP servers",
   "/skills": "list skills", "/plugin": "manage plugins", "/cost": "session cost",
-  "/usage": "token usage stats", "/context": "context usage", "/config": "open config",
+  "/usage": "token usage stats", "/context": "context usage", "/config": "show config file + values",
   "/status": "session + provider status", "/memory": "show GOAT.md", "/rename": "rename the session",
-  "/doctor": "diagnose install",
+  "/export": "save the conversation (md/html)", "/doctor": "diagnose install (live probe)",
   "/init": "create GOAT.md", "/review": "review a PR", "/undo": "revert last turn's file changes",
   "/tasks": "list background bash tasks", "/quit": "exit",
 };

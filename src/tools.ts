@@ -10,6 +10,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSy
 import { dirname, join, relative, resolve } from "node:path";
 import { decide } from "./permissions.ts";
 import { fireHooks, type HooksConfig } from "./hooks.ts";
+import { log } from "./logger.ts";
 import { MAX_WEBFETCH_BYTES, WEBFETCH_TIMEOUT_MS } from "./constants.ts";
 import type { ContentPart, ToolSpec } from "./llm.ts";
 
@@ -45,6 +46,20 @@ export const IMAGE_TYPES: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
   ".gif": "image/gif", ".webp": "image/webp",
 };
+
+/**
+ * Detect real image type from magic bytes — never trust the extension.
+ * Returns a media type, or null if the buffer isn't a supported image.
+ */
+export function sniffImage(buf: Buffer): string | null {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  const sig = buf.subarray(0, 6).toString("latin1");
+  if (sig === "GIF87a" || sig === "GIF89a") return "image/gif";
+  if (buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  return null;
+}
 export const SKIP_DIRS = new Set([
   ".git", "node_modules", "__pycache__", ".venv", "venv", "dist",
   "build", ".next", ".cache", "target", ".tox", ".mypy_cache",
@@ -317,17 +332,19 @@ export class ToolKit {
     const p = this.inside(String(args.path));
     if (!existsSync(p) || !statSync(p).isFile()) return { ok: false, output: `not a file: ${args.path}` };
     const ext = p.toLowerCase().slice(p.lastIndexOf("."));
-    const mediaType = IMAGE_TYPES[ext];
-    if (mediaType) {
-      // vision input: hand the raw bytes to the model as an image content part
+    if (IMAGE_TYPES[ext]) {
+      // vision input: sniff magic bytes — the extension is only a hint
       const size = statSync(p).size;
       if (size > MAX_IMAGE_BYTES)
         return { ok: false, output: `image too large (${size} bytes; max ${MAX_IMAGE_BYTES})` };
-      const b64 = readFileSync(p).toString("base64");
+      const buf = readFileSync(p);
+      const mediaType = sniffImage(buf);
+      if (!mediaType)
+        return { ok: false, output: `${args.path} has an image extension but isn't a png/jpeg/gif/webp file` };
       return {
         ok: true,
         output: `read image ${args.path} (${mediaType}, ${size} bytes)`,
-        content: [{ type: "text", text: `[image ${args.path}]` }, { type: "image", data: b64, mediaType }],
+        content: [{ type: "text", text: `[image ${args.path}]` }, { type: "image", data: buf.toString("base64"), mediaType }],
       };
     }
     let text: string;

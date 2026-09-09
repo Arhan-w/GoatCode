@@ -462,7 +462,7 @@ describe("slash extras", () => {
     setCfg: () => {}, registry: { get: () => undefined, resolveCredential: () => null } as any,
     setSession: () => {}, saveCfg: () => {},
     exit: () => {}, mcp: null, skills: [], undoTurn: () => 0, backgroundTasks: () => [],
-    setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub",
+    setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub", reloadPlugins: () => 0,
   });
 
   test("/rename sets and persists the session title", async () => {
@@ -1004,7 +1004,7 @@ describe("compact command", () => {
       cfg: { model: "mock/m", maxTokens: 8192, autoApprove: false } as any,
       setCfg: () => {}, registry: null as any, setSession: () => {}, saveCfg: () => {},
       exit: () => {}, mcp: null, skills: [], undoTurn: () => 0, backgroundTasks: () => [],
-      setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub",
+      setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub", reloadPlugins: () => 0,
     };
     expect(runSlash("/compact", io)).toBe(true);
     expect(s.compactedFrom).toBe(0); // delegated — the stub doesn't mutate

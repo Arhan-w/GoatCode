@@ -53,6 +53,35 @@ export function contentChars(content: string | ContentPart[]): number {
   return content.reduce((s, p) => s + (p.type === "text" ? p.text.length : Math.ceil(p.data.length * 1.5)), 0);
 }
 
+/**
+ * Token estimate, much closer to reality than chars/4: prose ~4 chars/token,
+ * code ~3.2 (lots of punctuation), CJK ~1.5 (near 1 token per char). Images
+ * are ~1.5k tokens per 768px side regardless of bytes; we approximate with
+ * payload size. Only used for display/compaction heuristics, never billing.
+ */
+export function estimateTokens(content: string | ContentPart[]): number {
+  if (typeof content === "string") return textTokens(content);
+  return content.reduce(
+    (s, p) => s + (p.type === "text" ? textTokens(p.text) : Math.max(85, Math.round(p.data.length / 350))),
+    0,
+  );
+}
+
+export function textTokens(t: string): number {
+  if (!t) return 0;
+  let cjk = 0;
+  // count CJK + Hangul + Kana codepoints; they cost ~1-1.5 tokens per char
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    if ((c >= 0x3040 && c <= 0x30ff) || (c >= 0x4e00 && c <= 0x9fff) || (c >= 0xac00 && c <= 0xd7af)) cjk++;
+  }
+  const rest = t.length - cjk;
+  // code-ish content densifies tokens: punctuation/indent ratio nudges the divisor down
+  const punct = (t.match(/[{}()\[\]<>=;:,.#*_|\\&^%$@"'`]/g) ?? []).length;
+  const divisor = punct / Math.max(rest, 1) > 0.08 ? 3.2 : 4.0;
+  return Math.ceil(cjk * 1.4 + rest / divisor);
+}
+
 export interface StreamEvent {
   textDelta?: string;
   thinkingDelta?: string;
