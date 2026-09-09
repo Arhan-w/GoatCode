@@ -76,13 +76,16 @@ function runOne(cmd: string, payload: HookPayload, timeoutMs: number): Promise<{
       cwd: payload.cwd, env: process.env,
     });
     let stdout = "", stderr = "";
+    // write stdin IMMEDIATELY and swallow EPIPE/ECONNRESET: fast-exiting
+    // hooks (exit 2 guards) can die before Bun flushes the pipe, which would
+    // otherwise surface as an uncaught stream error.
+    child.stdin.on("error", () => { /* hook closed the pipe early */ });
+    try { child.stdin.end(JSON.stringify(payload)); } catch { /* */ }
     const timer = setTimeout(() => { child.kill(); done({ code: -1, stdout, stderr: stderr + "\n[hook timed out]" }); }, timeoutMs);
     child.stdout.on("data", (d) => { stdout += d; });
     child.stderr.on("data", (d) => { stderr += d; });
     child.on("close", (code) => { clearTimeout(timer); done({ code: code ?? 0, stdout, stderr }); });
     child.on("error", (e) => { clearTimeout(timer); done({ code: -1, stdout: "", stderr: String(e?.message ?? e) }); });
-    child.stdin.write(JSON.stringify(payload));
-    child.stdin.end();
   });
 }
 
