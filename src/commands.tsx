@@ -35,8 +35,8 @@ export interface SlashIO {
   exit(): void;
   mcp: McpClient | null;
   skills: SkillDef[];
-  /** Revert the last turn's file mutations; -1 = no toolkit, count = reverted. */
-  undoTurn(): number;
+  /** Revert the last turn's file mutations; null = no toolkit yet. */
+  undoTurn(): number | null;
   backgroundTasks(): { id: string; cmd: string; status: string; started: number }[];
   setMode(mode: "default" | "acceptEdits" | "plan" | "bypass"): void;
   runTurn(text: string | import("./llm.ts").ContentPart[]): Promise<void>;
@@ -396,8 +396,8 @@ export function runSlash(line: string, io: SlashIO): boolean {
 
     case "/undo": {
       const r = io.undoTurn();
-      if (r === null) io.push(<Text dimColor color="#8a8a8a">  nothing to undo</Text>);
-      else if (r === 0) io.push(<Text color="#f87171">✗ no tool kit yet — run a turn first</Text>);
+      if (r === null) io.push(<Text color="#f87171">✗ no tool kit yet — run a turn first</Text>);
+      else if (r === 0) io.push(<Text dimColor color="#8a8a8a">  nothing to undo from the last turn</Text>);
       else io.push(<Text color="#4ade80">✓ reverted {r} file mutation{r > 1 ? "s" : ""} from the last turn</Text>);
       return true;
     }

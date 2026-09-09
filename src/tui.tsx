@@ -17,7 +17,7 @@ import { Agent, type AgentEvent } from "./agent.ts";
 import { COMMAND_DESC, SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
 import { appDir, loadConfig, saveConfig, type GoatConfig } from "./config.ts";
 import { ProviderRegistry } from "./providers.ts";
-import { ResolveError, resolve } from "./runtime.ts";
+import { resolveSmall, ResolveError, resolve } from "./runtime.ts";
 import { Session } from "./session.ts";
 import { loadSkills, loadSkillBody, type SkillDef } from "./skills/loader.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
@@ -253,6 +253,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const buildAgent = useCallback(async (): Promise<Agent | null> => {
     try {
       const r = await resolve(cfgRef.current, registryRef.current);
+      const smallClient = await resolveSmall(cfgRef.current, registryRef.current);
       const m = modeRef.current;
       // one ToolKit per session so the undo stack + bg tasks survive turns
       if (!toolsRef.current || toolsRef.current.root !== sessionRef.current.cwd)
@@ -271,7 +272,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         for (const spec of mcp.specs())
           tools.registerExternal({ spec, run: (args) => mcp.dispatch(spec.name, args) });
       return new Agent({
-        client: r.client, session: sessionRef.current, tools,
+        client: r.client, smallClient: smallClient ?? undefined,
+        session: sessionRef.current, tools,
         maxTokens: cfgRef.current.maxTokens, temperature: cfgRef.current.temperature,
         maxSteps: cfgRef.current.maxSteps,
         extraSystem: [buildExtraSystem(skills, sessionRef.current.cwd),
@@ -450,7 +452,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         session: sessionRef.current,
         setSession: (s) => { sessionRef.current = s; setSession(s); },
         saveCfg: saveConfig, push, exit, mcp, skills,
-        undoTurn: () => toolsRef.current ? toolsRef.current.undoCheckpoint() : -1,
+        undoTurn: () => toolsRef.current ? toolsRef.current.undoCheckpoint() : null,
         backgroundTasks: () => toolsRef.current?.backgroundTasks() ?? [],
         setMode: (m) => { setMode(m); setCfg((c) => ({ ...c, autoApprove: m === "bypass" })); },
         reloadPlugins: () => {

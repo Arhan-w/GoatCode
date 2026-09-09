@@ -6,7 +6,7 @@
 import { buildSystemPrompt } from "./system-prompt.ts";
 import { contentChars, isRetryableLLMError, textOf, type ChatClient, type ContentPart, type Message, type StreamEvent, type ToolCall, type ToolSpec } from "./llm.ts";
 import { Session, summarize } from "./session.ts";
-import { ToolKit, type PermissionFn, type Todo } from "./tools.ts";
+import { ToolKit, type PermissionFn, type Todo, type ToolResult } from "./tools.ts";
 import { fireHooks, MAX_STOP_HOOK_CONTINUES } from "./hooks.ts";
 import { SUBAGENT_MAX_STEPS } from "./constants.ts";
 
@@ -33,8 +33,15 @@ export type AgentEvent =
   | { kind: "error"; text: string }
   | { kind: "done" };
 
+/** Read-only tools the agent may run concurrently within one step
+ *  (Claude Code parallelizes these too). Excludes anything that can raise a
+ *  permission prompt — two simultaneous prompts would deadlock one of them. */
+export const CONCURRENT_SAFE = new Set(["read", "glob", "grep", "tasks"]);
+
 export interface AgentDeps {
   client: ChatClient;
+  /** Cheaper client for background work (compaction, explore subagents). */
+  smallClient?: ChatClient;
   session: Session;
   tools: ToolKit;
   maxTokens: number;
@@ -53,6 +60,7 @@ export interface AgentDeps {
 
 export class Agent {
   client: ChatClient;
+  smallClient: ChatClient | null;
   session: Session;
   tools: ToolKit;
   maxTokens: number;
@@ -66,6 +74,7 @@ export class Agent {
 
   constructor(deps: AgentDeps) {
     this.client = deps.client;
+    this.smallClient = deps.smallClient ?? null;
     this.session = deps.session;
     this.tools = deps.tools;
     this.maxTokens = deps.maxTokens;
@@ -137,16 +146,34 @@ export class Agent {
         role: "assistant", content: assistantText, toolCalls,
       };
       this.session.append(assistantMsg as Message);
-      for (const call of toolCalls) {
-        yield { kind: "tool_start", tool: call.name, args: call.arguments };
-        let result;
-        if (call.name === "task") {
-          if (this.disallowedTools.has("task"))
-            result = { ok: false, output: "subagents cannot spawn subagents" };
-          else result = await this.spawnSubagent(call.arguments);
+      // Read-only tools (read/grep/glob/webfetch/...) fan out concurrently —
+      // a 5-file exploration costs one round of latency, not five. Everything
+      // else (writes, bash, permission-prompting calls) stays sequential.
+      const results = new Map<ToolCall, ToolResult>();
+      let i = 0;
+      while (i < toolCalls.length) {
+        if (CONCURRENT_SAFE.has(toolCalls[i].name) && !this.disallowedTools.has(toolCalls[i].name)) {
+          const batch: ToolCall[] = [];
+          while (i < toolCalls.length && CONCURRENT_SAFE.has(toolCalls[i].name)) batch.push(toolCalls[i++]);
+          for (const c of batch) yield { kind: "tool_start", tool: c.name, args: c.arguments };
+          const settled = await Promise.all(batch.map((c) => this.tools.dispatch(c.name, c.arguments, signal)));
+          batch.forEach((c, k) => results.set(c, settled[k]));
         } else {
-          result = await this.tools.dispatch(call.name, call.arguments);
+          const call = toolCalls[i++];
+          yield { kind: "tool_start", tool: call.name, args: call.arguments };
+          let result;
+          if (call.name === "task") {
+            if (this.disallowedTools.has("task"))
+              result = { ok: false, output: "subagents cannot spawn subagents" };
+            else result = await this.spawnSubagent(call.arguments, signal);
+          } else {
+            result = await this.tools.dispatch(call.name, call.arguments, signal);
+          }
+          results.set(call, result);
         }
+      }
+      for (const call of toolCalls) {
+        const result = results.get(call)!;
         this.session.append({
           role: "tool",
           content: result.content ?? result.output.slice(0, 60_000),
@@ -237,16 +264,18 @@ export class Agent {
    * permission rules, hooks and MCP all apply. Explore mode = read-only
    * toolset. Returns the sub-agent's final text as the tool result.
    */
-  private async spawnSubagent(args: Record<string, unknown>): Promise<{ ok: boolean; output: string }> {
+  private async spawnSubagent(args: Record<string, unknown>, signal?: AbortSignal): Promise<{ ok: boolean; output: string }> {
     const prompt = String(args.prompt ?? "").trim();
     if (!prompt) return { ok: false, output: "task requires a prompt" };
     const description = String(args.description ?? "subagent").slice(0, 60);
     const explore = String(args.subagent_type ?? "") === "explore";
-    const disallowed = new Set(["task", "write", "edit", "undo", ...(explore ? ["bash"] : [])]);
+    const disallowed = new Set(["task", "write", "edit", "undo", ...(explore ? ["bash", "computer"] : ["computer"])]);
     const sub = Session.new(this.session.cwd, this.session.model);
     sub.title = `subagent: ${description}`;
     const child = new Agent({
-      client: this.client, session: sub, tools: this.tools,
+      // explore agents are pure reading: route them to the cheap model if configured
+      client: explore && this.smallClient ? this.smallClient : this.client,
+      session: sub, tools: this.tools,
       maxTokens: this.maxTokens, temperature: this.temperature,
       maxSteps: SUBAGENT_MAX_STEPS, extraSystem: this.extraSystem,
       retryBaseMs: this.retryBaseMs, maxAttempts: this.maxAttempts,
@@ -255,7 +284,7 @@ export class Agent {
     let text = "";
     let stepsUsed = 0;
     let error = "";
-    for await (const ev of child.runTurn(prompt)) {
+    for await (const ev of child.runTurn(prompt, signal)) {
       if (ev.kind === "text") text += ev.text;
       else if (ev.kind === "tool_start") stepsUsed++;
       else if (ev.kind === "error") error = ev.text;
@@ -298,7 +327,7 @@ export class Agent {
     let usedModel = false;
     try {
       let acc = "";
-      for await (const ev of this.client.streamChat(
+      for await (const ev of (this.smallClient ?? this.client).streamChat(
         [
           { role: "system", content: "You compress coding-agent transcripts. Write a dense continuation summary of the transcript below: user goals and constraints, decisions made, files created/edited (paths), current state, and open threads. Under 500 words. Plain text, no preamble." },
           { role: "user", content: transcript },

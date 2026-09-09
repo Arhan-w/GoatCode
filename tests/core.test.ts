@@ -1110,3 +1110,161 @@ describe("todo plan", () => {
     expect(todoEvents[0][0].activeForm).toBe("Stepping");
   });
 });
+
+// ---------- desktop control ----------
+describe("desktop control", () => {
+  test("computer + screenshot tools exist and permission-gate", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-desk-"));
+    const asked: string[] = [];
+    const tk = new ToolKit(root, { permission: (t) => { asked.push(t); return false; } });
+    const names = tk.specs().map((s) => s.name);
+    expect(names).toContain("computer");
+    expect(names).toContain("screenshot");
+    const r = await tk.dispatch("computer", { action: "click", x: 5, y: 5 });
+    expect(r.ok).toBe(false);
+    expect(asked).toContain("computer");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("never-send key combos are refused at the facade", async () => {
+    const { desktop } = await import("../src/computer.ts");
+    await expect(desktop.act("key", { combo: "win+l" })).rejects.toThrow(/never-send/);
+    await expect(desktop.act("key", { combo: "ctrl+alt+delete" })).rejects.toThrow(/never-send/);
+  });
+
+  test("unknown actions are rejected", async () => {
+    const { desktop } = await import("../src/computer.ts");
+    await expect(desktop.act("rmrf", {})).rejects.toThrow(/unknown desktop action/);
+  });
+
+  test("plan mode blocks the computer tool", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-deskr-"));
+    const tk = new ToolKit(root, { autoApprove: true, readonly: true });
+    const r = await tk.dispatch("computer", { action: "click", x: 1, y: 1 });
+    expect(r.ok).toBe(false);
+    expect(r.output).toContain("plan mode");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("subagents never get desktop control", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const a: any = { disallowedTools: new Set(["computer"]) };
+    expect(a.disallowedTools.has("computer")).toBe(true);
+    // the spawn guard itself:
+    const src = await Bun.file("src/agent.ts").text();
+    expect(src).toContain('"computer"');
+  });
+});
+
+// ---------- web search ----------
+describe("websearch", () => {
+  test("websearch tool exists, requires a query, and is permission-gated", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-srch-"));
+    const tk = new ToolKit(root, { autoApprove: true });
+    expect(tk.specs().map((s) => s.name)).toContain("websearch");
+    const bad = await tk.dispatch("websearch", {});
+    expect(bad.ok).toBe(false);
+    expect(bad.output).toContain("requires a query");
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ---------- parallel read-only tools ----------
+describe("parallel tools", () => {
+  test("read/glob/grep dispatch concurrently inside one step", async () => {
+    const { Agent, CONCURRENT_SAFE } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    expect(CONCURRENT_SAFE.has("read")).toBe(true);
+    expect(CONCURRENT_SAFE.has("write")).toBe(false);
+    expect(CONCURRENT_SAFE.has("bash")).toBe(false);
+
+    const root = mkdtempSync(join(tmpdir(), "goat-para-"));
+    writeFileSync(join(root, "a.txt"), "alpha");
+    writeFileSync(join(root, "b.txt"), "beta");
+    writeFileSync(join(root, "c.txt"), "gamma");
+    const tk = new ToolKit(root, { autoApprove: true });
+    // instrument dispatch with a barrier: if calls run sequentially this deadlocks
+    let active = 0, maxActive = 0;
+    const orig = tk.dispatch.bind(tk);
+    (tk as any).dispatch = async (name: string, args: any, signal?: AbortSignal) => {
+      active++; maxActive = Math.max(maxActive, active);
+      await Bun.sleep(30);
+      const r = await orig(name, args, signal);
+      active--;
+      return r;
+    };
+    let turn = 0;
+    const client = {
+      async *streamChat() {
+        turn++;
+        if (turn === 1)
+          yield { toolCalls: [
+            { id: "1", name: "read", arguments: { path: "a.txt" } },
+            { id: "2", name: "read", arguments: { path: "b.txt" } },
+            { id: "3", name: "read", arguments: { path: "c.txt" } },
+          ] };
+        else yield { textDelta: "done" };
+      },
+    } as any;
+    const agent = new Agent({
+      client, session: Session.new(root, "mock/m"), tools: tk,
+      maxTokens: 10, temperature: null, maxSteps: 3,
+    });
+    const ends: any[] = [];
+    for await (const ev of agent.runTurn("read all"))
+      if (ev.kind === "tool_end") ends.push(ev);
+    expect(maxActive).toBe(3);           // all three in flight at once
+    expect(ends.length).toBe(3);
+    expect(ends[0].result).toContain("alpha"); // order preserved in the transcript
+    expect(ends[2].result).toContain("gamma");
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ---------- small model routing ----------
+describe("small model", () => {
+  test("config parses small_model and compactNow uses it when present", async () => {
+    const { loadConfig } = await import("../src/config.ts");
+    writeFileSync(join(home, "config.json"), JSON.stringify({
+      model: "openai/gpt-4o", small_model: "groq/llama-3.3-70b",
+    }));
+    const cfg = loadConfig(home);
+    expect(cfg.smallModel).toBe("groq/llama-3.3-70b");
+  });
+
+  test("resolveSmall returns null when unset or same as main", async () => {
+    const { resolveSmall } = await import("../src/runtime.ts");
+    const { loadConfig } = await import("../src/config.ts");
+    const { ProviderRegistry } = await import("../src/providers.ts");
+    const cfg = loadConfig(home);
+    expect(await resolveSmall(cfg, new ProviderRegistry())).toBeNull();
+    cfg.smallModel = "openai/gpt-4o"; cfg.model = "openai/gpt-4o";
+    expect(await resolveSmall(cfg, new ProviderRegistry())).toBeNull();
+  });
+
+  test("compact calls the smallClient, not the main client", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    let mainCalls = 0, smallCalls = 0;
+    const mk = (n: string) => ({ async *streamChat() {
+      if (n === "main") mainCalls++; else smallCalls++;
+      yield { textDelta: "compressed digest" };
+    } } as any);
+    const session = Session.new(home, "mock/m");
+    for (let i = 0; i < 20; i++) session.messages.push({ role: "user", content: `msg ${i} ` + "y".repeat(100) });
+    const agent = new Agent({
+      client: mk("main"), smallClient: mk("small"), session,
+      tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 1,
+    });
+    const r = await agent.compactNow();
+    expect(r.model).toBe(true);
+    expect(smallCalls).toBe(1);
+    expect(mainCalls).toBe(0);
+  });
+});

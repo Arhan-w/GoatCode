@@ -12,6 +12,7 @@ import { decide } from "./permissions.ts";
 import { fireHooks, type HooksConfig } from "./hooks.ts";
 import { log } from "./logger.ts";
 import { MAX_WEBFETCH_BYTES, WEBFETCH_TIMEOUT_MS } from "./constants.ts";
+import { desktop, type DesktopBackend } from "./computer.ts";
 import type { ContentPart, ToolSpec } from "./llm.ts";
 
 /** SSRF guard: refuse loopback / private / link-local / cloud-metadata hosts.
@@ -47,6 +48,14 @@ export const IMAGE_TYPES: Record<string, string> = {
   ".gif": "image/gif", ".webp": "image/webp",
 };
 
+/** Strip HTML tags + entities (search result text). */
+function stripTags(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#x27;|&apos;/g, "'").replace(/&nbsp;/g, " ");
+}
+
 /**
  * Detect real image type from magic bytes — never trust the extension.
  * Returns a media type, or null if the buffer isn't a supported image.
@@ -62,7 +71,7 @@ export function sniffImage(buf: Buffer): string | null {
 }
 export const SKIP_DIRS = new Set([
   ".git", "node_modules", "__pycache__", ".venv", "venv", "dist",
-  "build", ".next", ".cache", "target", ".tox", ".mypy_cache",
+  "build", ".next", ".cache", "target", ".tox", ".mypy_cache", ".goat",
 ]);
 
 export interface ToolResult {
@@ -459,6 +468,94 @@ export class ToolKit {
     }
   }
 
+  /** Keyless web search via DuckDuckGo's HTML endpoint (also lite fallback). */
+  async tool_websearch(args: Record<string, any>): Promise<ToolResult> {
+    const query = String(args.query ?? "").trim();
+    if (!query) return { ok: false, output: "websearch requires a query" };
+    const denied = await this.ask("websearch", args);
+    if (denied) return denied;
+    const max = Math.min(15, Math.max(1, Number(args.max_results ?? 8)));
+    try {
+      const res = await fetch("https://html.duckduckgo.com/html/", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "user-agent": "Mozilla/5.0 (X11; Linux x86_64) goatcode/2.0",
+        },
+        body: new URLSearchParams({ q: query, kl: "wt-wat" } as any).toString(),
+        redirect: "follow",
+        signal: AbortSignal.timeout(WEBFETCH_TIMEOUT_MS),
+      });
+      if (!res.ok) return { ok: false, output: `search failed: HTTP ${res.status}` };
+      const html = await res.text();
+      // result anchors: <a rel="nofollow" class="result__a" href="...">Title</a>
+      // + snippet: <a class="result__snippet">...</a>
+      const results: { title: string; url: string; snippet: string }[] = [];
+      const linkRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+      const snipRe = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+      const snippets: string[] = [];
+      for (const s of html.matchAll(snipRe)) snippets.push(stripTags(s[1]).trim());
+      let k = 0;
+      for (const m of html.matchAll(linkRe)) {
+        if (results.length >= max) break;
+        let url = m[1];
+        // ddg wraps links: //duckduckgo.com/l/?uddg=<encoded>&rut=...
+        const um = url.match(/[?&]uddg=([^&]+)/);
+        if (um) { try { url = decodeURIComponent(um[1]); } catch { /* keep raw */ } }
+        results.push({ title: stripTags(m[2]).trim(), url, snippet: snippets[k++] ?? "" });
+      }
+      if (!results.length) return { ok: false, output: `no results for "${query}" (search endpoint may be rate-limited — try webfetch on a known URL)` };
+      const lines = results.map((r, i) =>
+        `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet.slice(0, 240)}` : ""}`);
+      return { ok: true, output: `# results for: ${query}\n${lines.join("\n")}\n\n[Use webfetch to read a result in full.]` };
+    } catch (e: any) {
+      return { ok: false, output: `search failed: ${e?.message ?? e}` };
+    }
+  }
+
+  // ---- desktop control ----------------------------------------------------
+
+  /** Capture the real screen; attach the PNG so vision models can see it. */
+  async tool_screenshot(args: Record<string, any>): Promise<ToolResult> {
+    const denied = await this.ask("computer", { action: "screenshot" });
+    if (denied) return denied;
+    try {
+      const out = join(this.root, ".goat", `screen-${Date.now()}.png`);
+      mkdirSync(dirname(out), { recursive: true });
+      const shot = await desktop.screenshot(out);
+      const rel = relative(this.root, out).replaceAll("\\", "/");
+      const dims = shot.width ? ` ${shot.width}x${shot.height}px` : "";
+      if (args.path) { // save a copy somewhere the user asked for
+        try { writeFileSync(this.inside(String(args.path)), shot.png); } catch { /* non-sandbox save */ }
+      }
+      return {
+        ok: true,
+        output: `screen captured (${dims}, ${shot.png.length} bytes) → ${rel}`,
+        content: [
+          { type: "text", text: `[screenshot${dims} — saved to ${rel}; click coordinates are screen pixels]` },
+          { type: "image", data: shot.png.toString("base64"), mediaType: "image/png" },
+        ],
+      };
+    } catch (e: any) {
+      return { ok: false, output: `screenshot failed: ${e?.message ?? e} (backend: ${await desktop.detect()})` };
+    }
+  }
+
+  /** One tool for every desktop action: click / type / key / scroll / launch / windows / clipboard. */
+  async tool_computer(args: Record<string, any>): Promise<ToolResult> {
+    const action = String(args.action ?? "");
+    if (!action) return { ok: false, output: "computer requires an action" };
+    const denied = await this.ask("computer", args);
+    if (denied) return denied;
+    try {
+      const msg = await desktop.act(action, args);
+      const backend = desktop.backend as DesktopBackend;
+      return { ok: true, output: `[${backend}] ${msg}` };
+    } catch (e: any) {
+      return { ok: false, output: `computer ${action} failed: ${e?.message ?? e}` };
+    }
+  }
+
   tool_undo(): ToolResult {
     if (this.readonly)
       return { ok: false, output: "undo blocked by plan mode — the user can still run /undo from the prompt" };
@@ -602,6 +699,32 @@ function builtinSpecs(): ToolSpec[] {
         url: { type: "string", description: "http(s) URL" },
         prompt: { type: "string", description: "What to look for (returned alongside the text; text is truncated to 200 KB)" },
       }, required: ["url"] } },
+    { name: "screenshot", description:
+      "Capture the real desktop screen and SEE it (the image is attached to your next turn on vision models). Coordinates for the computer tool are screen pixels from this image. Optional path saves a copy into the project.",
+      parameters: { type: "object", properties: {
+        path: { type: "string", description: "Optional project-relative path to save the PNG" },
+      } } },
+    { name: "websearch", description:
+      "Search the web (DuckDuckGo) and get titles, URLs, snippets. No API key needed. Use for current events, library docs, error messages. Then webfetch the best result for details.",
+      parameters: { type: "object", properties: {
+        query: { type: "string", description: "Search query" },
+        max_results: { type: "integer", description: "1-15 results (default 8)" },
+      }, required: ["query"] } },
+    { name: "computer", description:
+      "Control the user's desktop like a person: click, type, press keys, scroll, launch apps, list windows, read/write the clipboard. Workflow: screenshot first to see the screen -> act with coordinates from that image -> screenshot again to verify. Background-first when a driver is installed (no focus steal). NEVER click permission/payment/password dialogs or type secrets; stop and ask the user instead.",
+      parameters: { type: "object", properties: {
+        action: { type: "string", enum: ["click", "double_click", "right_click", "type", "key", "scroll", "launch", "windows", "clipboard"],
+          description: "What to do" },
+        x: { type: "integer", description: "Screen x pixel (click/scroll) from the last screenshot" },
+        y: { type: "integer", description: "Screen y pixel" },
+        text: { type: "string", description: "Text to type, or clipboard content to set" },
+        combo: { type: "string", description: "key action: e.g. 'ctrl+s', 'alt+tab', 'enter'" },
+        direction: { type: "string", enum: ["up", "down", "left", "right"], description: "scroll direction" },
+        amount: { type: "integer", description: "scroll ticks (default 3)" },
+        app: { type: "string", description: "launch: app name or full path" },
+        pid: { type: "integer", description: "Target process id (from the windows action) — required for type on Windows via driver; clicks route to the window under the point" },
+        window_title: { type: "string", description: "Alternative to pid: case-insensitive substring of the window title to target (type/key)" },
+      }, required: ["action"] } },
     { name: "todo", description:
       "Create and manage a structured task list for the current work. Use proactively for multi-step tasks (3+ steps); update statuses in real time — mark a task in_progress BEFORE starting it and completed IMMEDIATELY after, exactly one in_progress at a time. Skip it for single trivial tasks. Do not batch completions. The list is shown live to the user.",
       parameters: { type: "object", properties: {

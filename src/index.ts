@@ -18,7 +18,7 @@ import { appDir, loadConfig, saveConfig, splitModel, type CustomEndpoint } from 
 import { CredentialStore, OAUTH_PROVIDERS, ProviderRegistry, type Credential } from "./providers.ts";
 import { listSessions } from "./session.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
-import { resolve } from "./runtime.ts";
+import { resolve, resolveSmall } from "./runtime.ts";
 import { Agent } from "./agent.ts";
 import { ToolKit } from "./tools.ts";
 import { Session } from "./session.ts";
@@ -218,7 +218,8 @@ async function main(): Promise<number> {
       } catch { /* mcp optional in print mode */ }
     }
     const agent = new Agent({
-      client: r.client, session, tools,
+      client: r.client, smallClient: (await resolveSmall(cfg, registry)) ?? undefined,
+      session, tools,
       maxTokens: cfg.maxTokens, temperature: cfg.temperature, maxSteps: cfg.maxSteps,
       extraSystem: [buildExtraSystem(allSkills(cfg), process.cwd()),
         loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),

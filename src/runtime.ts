@@ -3,7 +3,7 @@
  * Handles lazy OAuth refresh and the special headers subscription-backed
  * endpoints (Copilot, Codex) expect.
  */
-import type { GoatConfig } from "./config.ts";
+import { splitModel, type GoatConfig } from "./config.ts";
 import { makeClient, type ChatClient } from "./llm.ts";
 import { refresh } from "./oauth.ts";
 import {
@@ -70,6 +70,11 @@ export async function resolve(cfg: GoatConfig, registry: ProviderRegistry): Prom
     fmt = meta.api_format;
     base = normalizeBaseUrl(meta.base_url);
   }
+  const client = buildClient(fmt, base, cred, provider.id);
+  return { provider, credential: cred, client };
+}
+
+function buildClient(fmt: string, base: string, cred: Credential, providerId: string): ChatClient {
   let apiKey = cred.apiKey;
   let authToken = cred.kind === "oauth" ? cred.accessToken : undefined;
   // OpenAI-compatible endpoints with OAuth send the bearer via the api_key slot
@@ -77,8 +82,24 @@ export async function resolve(cfg: GoatConfig, registry: ProviderRegistry): Prom
     apiKey = authToken;
     authToken = undefined;
   }
-  const client = makeClient(fmt, base, {
-    apiKey, authToken, extraHeaders: headersFor(provider.id),
+  return makeClient(fmt, base, {
+    apiKey, authToken, extraHeaders: headersFor(providerId),
   });
-  return { provider, credential: cred, client };
+}
+
+/**
+ * Resolve the configured small/cheap model for background work (compaction,
+ * explore subagents). Returns null when unset or unresolvable — callers fall
+ * back to the main client, so a bad small_model never breaks the session.
+ */
+export async function resolveSmall(cfg: GoatConfig, registry: ProviderRegistry): Promise<ChatClient | null> {
+  if (!cfg.smallModel || cfg.smallModel === cfg.model) return null;
+  try {
+    const small = { ...cfg, model: cfg.smallModel };
+    splitModel(small);
+    const r = await resolve(small, registry);
+    return r.client;
+  } catch {
+    return null;
+  }
 }
