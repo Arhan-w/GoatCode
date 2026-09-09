@@ -1,10 +1,11 @@
+#!/usr/bin/env bash
 # install-goat — one-command global install of GoatCode (Windows, Linux, macOS).
 #
 #   curl -fsSL https://raw.githubusercontent.com/Arhan-w/GoatCode/v2-typescript/install.sh | bash
 #
 # Strategy: prefer the prebuilt release binary for this platform (fast, no
 # toolchain); fall back to building from source with Bun when no release
-# matches. Drops `goat` on PATH. Idempotent — re-running upgrades in place.
+# matches. Drops `goat` on PATH. Idempotent — re-running upgrades.
 set -euo pipefail
 
 REPO_SLUG="Arhan-w/GoatCode"
@@ -12,10 +13,19 @@ BRANCH="${GOAT_BRANCH:-v2-typescript}"
 INSTALL_DIR="${GOAT_INSTALL_DIR:-$HOME/.goatcode/bin}"
 REPO_DIR="$HOME/.goatcode/src"
 
-GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'
 log()  { printf '%s[goat-install]%s %s\n' "$GREEN" "$NC" "$*"; }
 warn() { printf '%s[goat-install]%s %s\n' "$YELLOW" "$NC" "$*"; }
 err()  { printf '%s[goat-install]%s %s\n' "$RED" "$NC" "$*" >&2; }
+
+# Native Windows tools (curl.exe, bun.exe) cannot see MSYS paths like
+# /c/Users/x — they resolve them against the current drive. Translate any
+# path handed to them when cygpath is available (git-bash / msys2).
+if command -v cygpath >/dev/null 2>&1; then
+  wpath() { cygpath -w "$1" 2>/dev/null || printf '%s' "$1"; }
+else
+  wpath() { printf '%s' "$1"; }
+fi
 
 # --- 0. Platform -----------------------------------------------------------
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -36,24 +46,27 @@ mkdir -p "$INSTALL_DIR" "$HOME/.goatcode"
 # --- 1. Try the prebuilt release binary ------------------------------------
 # Release assets are named goat-<os>-<arch>[.exe] (see .github/workflows).
 fetch_asset() {
-  local name="$1" url="https://github.com/$REPO_SLUG/releases/latest/download/$name"
+  local name="$1"
+  local url="https://github.com/$REPO_SLUG/releases/latest/download/$name"
   local tmp="$HOME/.goatcode/.dl-part"
+  rm -f "$tmp"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "$tmp" "$url" 2>/dev/null || return 1
+    curl -fsSL -o "$(wpath "$tmp")" "$url" 2>/dev/null || return 1
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$tmp" "$url" 2>/dev/null || return 1
+    wget -q -O "$(wpath "$tmp")" "$url" 2>/dev/null || return 1
   else
     return 1
   fi
   [ -s "$tmp" ] || { rm -f "$tmp"; return 1; }
-  # sanity: real binaries are ~100 MB; anything small is an error page
-  local size; size=$(wc -c < "$tmp")
+  # sanity: real binaries are ~90 MB; a small file is an HTML error page
+  local size
+  size=$(wc -c < "$tmp")
   if [ "$size" -lt 1000000 ]; then
     rm -f "$tmp"; warn "asset too small ($size bytes) — skipping"
     return 1
   fi
-  mv "$tmp" "$INSTALL_DIR/$BIN_NAME"
-  chmod +x "$INSTALL_DIR/$BIN_NAME"
+  mv -f "$tmp" "$INSTALL_DIR/$BIN_NAME"
+  chmod +x "$INSTALL_DIR/$BIN_NAME" 2>/dev/null || true
   return 0
 }
 
@@ -76,11 +89,11 @@ else
       git clone --depth=1 --branch "$BRANCH" "https://github.com/$REPO_SLUG.git" "$REPO_DIR"
     fi
     ( cd "$REPO_DIR" && bun install --frozen-lockfile 2>/dev/null || bun install )
-    if bun build "$REPO_DIR/src/index.ts" --compile --outfile "$INSTALL_DIR/$BIN_NAME" >/dev/null 2>&1; then
+    if ( cd "$REPO_DIR" && bun build src/index.ts --compile --outfile "$(wpath "$INSTALL_DIR/$BIN_NAME")" >/dev/null 2>&1 ); then
       log "built from source"
     else
       warn "compile failed — installing a bun-runner shim"
-      printf '#!/usr/bin/env bash\nexec bun run "%s/src/index.ts" "$@"\n' "$REPO_DIR" > "$INSTALL_DIR/$BIN_NAME"
+      printf '#!/usr/bin/env bash\nexec bun run "%s/src/index.ts" "$@"\n' "$(wpath "$REPO_DIR")" > "$INSTALL_DIR/$BIN_NAME"
       chmod +x "$INSTALL_DIR/$BIN_NAME"
     fi
   else
