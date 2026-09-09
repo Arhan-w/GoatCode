@@ -21,6 +21,24 @@ markdown under a live spinner, sandboxed tools with permission prompts,
 
 ---
 
+## Why GoatCode over Claude Code / Codex / the rest
+
+| | Claude Code | Codex CLI | **GoatCode** |
+|---|---|---|---|
+| Models | Anthropic only | OpenAI only | **any of 183 providers** + any OpenAI / Anthropic / Responses / Gemini-shaped endpoint, switch mid-session (`/model`) |
+| Your subscriptions | Claude only | ChatGPT only | **Claude Pro/Max · ChatGPT · Gemini · Copilot · Kimi · Grok** → OAuth to real API credentials, no per-seat agent fee on top |
+| Desktop control | separate paid harness | — | **built in** — `screenshot` + `computer` (click/type/launch/clipboard), background input |
+| Install | Node runtime | Node runtime | **one file on PATH** (5 platforms, prebuilt) — one curl command |
+| Cost blindness | guess | guess | `/cost` prices real token counts against a live rate table |
+| Open source | no | yes-ish | **yes, MIT** — read the loop, patch the loop |
+| Compatibility | — | — | drop-in: `.claude/skills`, `.mcp.json`, Claude `settings.json` hook & permission shapes all work |
+
+Same agentic core you'd expect — streaming TUI, plan mode, permission
+prompts, sub-agents, parallel tool calls, hooks, undo checkpoints — minus the
+vendor lock-in and the second subscription. If you live in one model, the
+big ones are great. If you'd rather pay whoever wins *this month*, that's
+GoatCode.
+
 ## What's new in v2
 
 | | v1 (Python) | v2 (TypeScript/Bun) |
@@ -117,6 +135,8 @@ Claude Code's interaction model, GoatCode's engine:
 - **shift+tab / ctrl+o mode cycle** — `ask before edits → ⏵⏵ accept edits → ⏸ plan → ⏩ bypass`
 - **/** completion menu with descriptions for every command
 - **@file** injects file contents · **!cmd** runs bash inline · **# note** saves to GOAT.md
+- **Ctrl+V** pastes a clipboard *image* straight into your message (screenshots,
+  designs — any vision model sees it); text pastes work as normal input
 - **websearch** — the model looks things up live (DuckDuckGo, no API key) and
   **webfetch**es the best result for details
 - **small_model** — route background work (compaction, explore sub-agents) to a

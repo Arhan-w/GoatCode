@@ -10,7 +10,7 @@
  */
 import { Box, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
-import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join, relative, resolve as resolvePath } from "node:path";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Agent, type AgentEvent } from "./agent.ts";
@@ -24,6 +24,7 @@ import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import { buildExtraSystem, loadOutputStyle } from "./context.ts";
 import { loadMcpFromConfig, type McpClient } from "./mcp/client.ts";
 import { ToolKit, IMAGE_TYPES, MAX_IMAGE_BYTES, sniffImage } from "./tools.ts";
+import { clipboardImage } from "./computer.ts";
 import { runStatusLine, statusInput } from "./statusline.ts";
 import { log } from "./logger.ts";
 import { contentChars, estimateTokens } from "./llm.ts";
@@ -188,6 +189,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [completions, setCompletions] = useState<string[]>([]);
   const [compSel, setCompSel] = useState(0);
   const [thinkLine, setThinkLine] = useState("");
+  const [pasted, setPasted] = useState<string | null>(null); // ctrl+V image path
   const [todos, setTodos] = useState<Todo[]>([]);
   const [statusLines, setStatusLines] = useState<string[]>([]);
 
@@ -433,7 +435,25 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
 
     // @file references — text refs inline as fenced content; image refs attach
     // base64 parts the model can see (anthropic/openai/gemini/responses)
-    const expanded = buildUserContent(text, sessionRef.current.cwd, push);
+    let expanded = buildUserContent(text, sessionRef.current.cwd, push);
+    // ctrl+V image: attach as a base64 part (and give a bare paste a prompt)
+    if (pasted) {
+      try {
+        const buf = readFileSync(pasted);
+        const mediaType = sniffImage(buf);
+        if (mediaType) {
+          const imgPart = { type: "image", data: buf.toString("base64"), mediaType } as ContentPart;
+          const intro = typeof expanded === "string"
+            ? (text ? expanded : "What do you see in this image?")
+            : expanded;
+          expanded = Array.isArray(intro)
+            ? [...intro, imgPart]
+            : [{ type: "text", text: intro }, imgPart];
+        }
+      } catch { /* fall back to text-only */ }
+      try { unlinkSync(pasted); } catch { /* */ }
+      setPasted(null);
+    }
 
     // /skill-name invocation: load the body and run it as a prompt
     if (text.startsWith("/") && !SLASH_COMMANDS.some((c) => text === c || text.startsWith(c + " "))) {
@@ -480,7 +500,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     void runTurn(expanded);
-  }, [thinking, push, mcp, skills, exit, runTurn, completions, compSel]);
+  }, [thinking, push, mcp, skills, exit, runTurn, completions, compSel, pasted]);
 
   const cycleMode = useCallback(() => {
     setMode((m) => {
@@ -516,6 +536,23 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     }
     if (k.ctrl && ch === "d") { exit(); return; }
     if (k.ctrl && ch === "k") { setInput(""); return; } // clear current input line
+    if (k.ctrl && ch === "v") {
+      // clipboard image attach (Claude-Code-style); text pastes are handled by
+      // the terminal itself and arrive as ordinary input
+      void clipboardImage().then((p) => {
+        if (!p) { push(<Text dimColor color={DIM}>  clipboard has no image</Text>); return; }
+        try {
+          const size = statSync(p).size;
+          if (size > MAX_IMAGE_BYTES) { push(<Text color={RED}>  ⚠ pasted image too large ({size} bytes)</Text>); return; }
+          if (!sniffImage(readFileSync(p))) { push(<Text color={RED}>  ⚠ clipboard image is not a png/jpeg/gif/webp</Text>); return; }
+          setPasted(p);
+          push(<Text color={ACCENT}>  ⧈ image attached from clipboard — type your question and hit Enter</Text>);
+        } catch (e: any) {
+          push(<Text color={RED}>  paste failed: {e?.message ?? e}</Text>);
+        }
+      });
+      return;
+    }
     if (k.ctrl && ch === "t") {
       const rows = toolsRef.current?.backgroundTasks() ?? [];
       if (!rows.length) push(<Text dimColor color={DIM}>  no background tasks</Text>);
@@ -530,6 +567,9 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     if (k.ctrl && ch === "o") { cycleMode(); return; }
+    // Shift+Tab arrives as an empty char with shift+tab flags (verified via
+    // Ink's parse-keypress); older/odd terminals send ESC [ Z as raw text.
+    if ((k.shift && k.tab) || ch === "\x1b[Z") { cycleMode(); return; }
     if (k.ctrl && ch === "l") { setLines([]); setStream(""); return; } // clear scrollback, keep session
     if (k.ctrl && ch === "r") {
       // reverse history search: cycle inserted prompt from history

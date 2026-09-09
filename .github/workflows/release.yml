@@ -8,7 +8,7 @@ permissions:
   contents: write   # create the release + upload assets with GITHUB_TOKEN
 
 jobs:
-  build:
+  native:
     strategy:
       matrix:
         include:
@@ -27,6 +27,29 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test
       - run: bun build src/index.ts --compile --outfile ${{ matrix.out }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.out }}
+
+  cross:
+    # Bun embeds prebuilt runtimes — one Linux runner ships Apple Silicon,
+    # Intel Mac, and ARM64 Linux too.
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: bun-darwin-x64
+            out: goat-darwin-x64
+          - target: bun-linux-arm64
+            out: goat-linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun build src/index.ts --compile --target=${{ matrix.target }} --outfile ${{ matrix.out }}
       - uses: softprops/action-gh-release@v2
         with:
           files: ${{ matrix.out }}

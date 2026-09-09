@@ -14,7 +14,7 @@
  * deny rules; a few hard-forbidden keys (lock, sign-out) are refused outright.
  */
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { log } from "./logger.ts";
@@ -579,3 +579,51 @@ export function findCuaDriver(): string | null {
 }
 
 export const desktop = new Desktop();
+
+// ---------- clipboard image (Ctrl+V in the TUI) ----------
+
+/**
+ * Grab an image from the system clipboard, save as PNG, return the path.
+ * null when the clipboard holds no image. Per-OS native tools; no deps.
+ */
+export async function clipboardImage(): Promise<string | null> {
+  const tmp = join(tmpdir(), `goat-paste-${Date.now()}.png`);
+  if (process.platform === "win32") {
+    const script = `
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing -ErrorAction SilentlyContinue
+$img = [System.Windows.Forms.Clipboard]::GetImage()
+if ($img) { $img.Save('${tmp.replaceAll("'", "''")}', [System.Drawing.Imaging.ImageFormat]::Png); Write-Output ok }`;
+    const r = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], OS_TIMEOUT_MS);
+    if (r.code === 0 && r.stdout.trim() === "ok" && existsSync(tmp)) return tmp;
+    return null;
+  }
+  if (process.platform === "darwin") {
+    // try PNG directly, else TIFF -> sips convert
+    const png = await run("osascript", ["-e",
+      `set f to open for access POSIX file "${tmp}" with write permission
+try
+  write (the clipboard as «class PNGf») to f
+end try
+close access f`], OS_TIMEOUT_MS);
+    if (png.code === 0 && existsSync(tmp)) return tmp;
+    const tiff = tmp.replace(/\.png$/, ".tiff");
+    const t = await run("osascript", ["-e",
+      `set f to open for access POSIX file "${tiff}" with write permission
+try
+  write (the clipboard as «class TIFF») to f
+end try
+close access f`], OS_TIMEOUT_MS);
+    if (t.code === 0 && existsSync(tiff)) {
+      await run("sips", ["-s", "format", "png", tiff, "--out", tmp], OS_TIMEOUT_MS);
+      try { unlinkSync(tiff); } catch { /* */ }
+      if (existsSync(tmp)) return tmp;
+    }
+    return null;
+  }
+  // Linux: Wayland then X11 (shell redirect keeps the bytes binary-safe)
+  const sh = (cmd: string) => run("bash", ["-c", `${cmd} > ${tmp} 2>/dev/null`], 5000);
+  if ((await sh("wl-paste --type image/png")).code === 0 && existsSync(tmp) && statSync(tmp).size > 0) return tmp;
+  if ((await sh("xclip -t image/png -selection clipboard -o")).code === 0 && existsSync(tmp) && statSync(tmp).size > 0) return tmp;
+  try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* */ }
+  return null;
+}
