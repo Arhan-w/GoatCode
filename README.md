@@ -55,7 +55,7 @@ GoatCode.
 ## Install
 
 ```bash
-npm install -g goatcode     # any OS with node/npm — fetches the right binary
+npm install -g goatcode-cli     # any OS with node/npm — fetches the right binary
 ```
 
 or, without npm (PowerShell / curl):
@@ -392,7 +392,8 @@ git commit -am "vX.Y.Z — <summary>" && git tag vX.Y.Z && git push origin HEAD:
 ```
 
 CI cross-compiles 5 platforms and publishes the GitHub release;
-`npm publish ./npm-package` ships the wrapper.
+`npm publish ./npm-package` ships the wrapper (name: `goatcode-cli` —
+`goatcode` is blocked by npm's similarity rule vs `goat-code`).
 
 ## License
 

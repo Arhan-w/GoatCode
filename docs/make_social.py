@@ -72,7 +72,7 @@ def main() -> None:
     d.text((tx, 282), "with built-in desktop control.", font=sub, fill=DIM)
 
     # install chip (must be a command that actually works today)
-    chip = "npm install -g goatcode"
+    chip = "npm install -g goatcode-cli"
     cw = d.textlength(chip, font=mono_s) + 44
     d.rounded_rectangle([tx, 348, tx + cw, 348 + 54], radius=10, fill=(22, 26, 36), outline=ACCENT, width=2)
     d.text((tx + 22, 362), chip, font=mono_s, fill=FG)

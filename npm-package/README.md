@@ -1,4 +1,4 @@
-# goatcode
+# goatcode-cli
 
 The open-source terminal coding agent. **Any provider** (183), **your
 subscriptions** (Claude Pro/Max, ChatGPT, Gemini, Copilot, Kimi, Grok via
@@ -7,7 +7,7 @@ OAuth), MCP servers, skills, plugins — and built-in **desktop control**
 fetches it for your platform.
 
 ```bash
-npm install -g goatcode
+npm install -g goatcode-cli
 goat
 ```
 

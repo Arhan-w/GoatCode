@@ -16,7 +16,7 @@ function runBinary() {
   if (!fs.existsSync(bin)) return null;
   const r = spawnSync(bin, process.argv.slice(2), { stdio: "inherit", windowsHide: true });
   if (r.error) {
-    console.error(`[goatcode] failed to run ${bin}: ${r.error.message}`);
+    console.error(`[goatcode-cli] failed to run ${bin}: ${r.error.message}`);
     process.exit(1);
   }
   return r.status === null ? 1 : r.status;
@@ -27,14 +27,14 @@ function main(retryDownload) {
   if (code !== null) process.exit(code);
 
   if (!retryDownload) {
-    console.error("[goatcode] binary missing and no download allowed — reinstall: npm i -g goatcode");
+    console.error("[goatcode-cli] binary missing and no download allowed — reinstall: npm i -g goatcode-cli");
     process.exit(1);
   }
-  process.stderr.write("[goatcode] first run: fetching the GoatCode binary...\n");
+  process.stderr.write("[goatcode-cli] first run: fetching the GoatCode binary...\n");
   install((err) => {
     if (err) {
-      console.error(`[goatcode] download failed: ${err.message}`);
-      console.error("[goatcode] manual install: see https://github.com/Arhan-w/GoatCode#install");
+      console.error(`[goatcode-cli] download failed: ${err.message}`);
+      console.error("[goatcode-cli] manual install: see https://github.com/Arhan-w/GoatCode#install");
       process.exit(1);
     }
     const code = runBinary();
