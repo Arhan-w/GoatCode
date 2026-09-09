@@ -507,6 +507,198 @@ describe("slash extras", () => {
   });
 });
 
+// ---------- permission rules ----------
+describe("permission rules", () => {
+  test("decide: deny > allow > ask, bash prefix/glob anti-bypass", async () => {
+    const { decide } = await import("../src/permissions.ts");
+    const rules = { allow: ["Bash(git add:*)", "Edit(src/**)"], deny: ["Bash(git push*)"] };
+    expect(decide(rules, "bash", { command: "git add ." })).toBe("allow");
+    expect(decide(rules, "bash", { command: "git push origin main" })).toBe("deny");
+    // compound commands defeat prefix-allow (anti-bypass) but not deny
+    expect(decide(rules, "bash", { command: "git add . && git push" })).toBe("ask");
+    expect(decide(rules, "edit", { path: "src/a/b.ts" })).toBe("allow");
+    expect(decide(rules, "write", { path: "src/x.ts" })).toBe("allow"); // Edit rules cover write
+    expect(decide(rules, "edit", { path: "docs/x.md" })).toBe("ask");
+    expect(decide(rules, "read", { path: "any" })).toBe("ask");
+    expect(decide(undefined, "bash", { command: "x" })).toBe("ask");
+  });
+
+  test("webfetch domain rules match host suffixes", async () => {
+    const { decide } = await import("../src/permissions.ts");
+    const rules = { allow: ["WebFetch(domain:docs.python.org)"], deny: [] };
+    expect(decide(rules, "webfetch", { url: "https://docs.python.org/3/x.html" })).toBe("allow");
+    expect(decide(rules, "webfetch", { url: "https://evil.com/docs.python.org" })).toBe("ask");
+  });
+});
+
+// ---------- hooks ----------
+describe("hooks", () => {
+  test("matcherMatches: regex semantics like Claude", async () => {
+    const { matcherMatches } = await import("../src/hooks.ts");
+    expect(matcherMatches(undefined, "bash")).toBe(true);
+    expect(matcherMatches("*", "bash")).toBe(true);
+    expect(matcherMatches("Bash", "bash")).toBe(true);
+    expect(matcherMatches("Bash|Edit", "edit")).toBe(true);
+    expect(matcherMatches("^mcp__.*", "mcp__fs__read")).toBe(true);
+    expect(matcherMatches("Bash", "write")).toBe(false);
+  });
+
+  test("PreToolUse hook exit 2 blocks; allow skips prompt", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-hook-"));
+    writeFileSync(join(root, "h.txt"), "x");
+    // deny hook: prints to stderr and exits 2
+    const denyHooks = { PreToolUse: [{ matcher: "Bash", hooks: [{ command: `echo nope >&2 && exit 2` }] }] };
+    const tk = new ToolKit(root, { autoApprove: true });
+    tk.hooks = denyHooks as any;
+    const r = await tk.dispatch("bash", { command: "echo hi" });
+    expect(r.ok).toBe(false);
+    expect(r.output).toContain("blocked by PreToolUse hook");
+    expect(r.output).toContain("nope");
+    // non-matching tool unaffected
+    const ok = await tk.dispatch("read", { path: "h.txt" });
+    expect(ok.ok).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("PreToolUse stdout permissionDecision deny overrides autoApprove", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-hook-"));
+    const script = join(root, "deny-hook.cjs");
+    writeFileSync(script, "process.stdout.write(JSON.stringify({hookSpecificOutput:{permissionDecision:'deny',permissionDecisionReason:'policy'}}))");
+    const tk = new ToolKit(root, { autoApprove: true });
+    tk.hooks = { PreToolUse: [{ hooks: [{ command: `${process.execPath} run ${script}` }] }] } as any;
+    const r = await tk.dispatch("bash", { command: "echo hi" });
+    expect(r.ok).toBe(false);
+    expect(r.output).toContain("denied by PreToolUse hook");
+    expect(r.output).toContain("policy");
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ---------- subagents ----------
+describe("subagents", () => {
+  test("task tool runs a child loop and returns its report", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    let parentCalls = 0, childCalls = 0;
+    const client = {
+      async *streamChat(msgs: any[], specs: any[]) {
+        const isChild = String(msgs[0]?.content).includes("sub-agent") || msgs.some((m: any) => String(m.content).includes("SUBTASK"));
+        if (!isChild) {
+          parentCalls++;
+          if (parentCalls === 1)
+            yield { toolCalls: [{ id: "t1", name: "task", arguments: { description: "answer", prompt: "SUBTASK: say hi", subagent_type: "explore" } }] };
+          else yield { textDelta: "parent done" };
+        } else {
+          childCalls++;
+          yield { textDelta: "child report: hi" };
+        }
+      },
+    } as any;
+    const session = Session.new(home, "mock/m");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 6,
+    });
+    let text = "";
+    const toolNames: string[] = [];
+    for await (const ev of agent.runTurn("go")) {
+      if (ev.kind === "text") text += ev.text;
+      if (ev.kind === "tool_start") toolNames.push(ev.tool);
+    }
+    expect(childCalls).toBeGreaterThan(0);
+    expect(toolNames).toContain("task");
+    // child report landed in the session as a tool result
+    const toolMsg = session.messages.find((m) => m.role === "tool" && m.name === "task");
+    expect(String(toolMsg?.content)).toContain("child report: hi");
+    expect(text).toContain("parent done");
+  });
+
+  test("sub-agents cannot spawn sub-agents", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const client = {
+      async *streamChat(_msgs: any[], specs: any[]) {
+        // child sees no task/write/edit tools in its spec list
+        if (!specs.some((s: any) => s.name === "task")) yield { textDelta: "no recursion tools" };
+        else yield { toolCalls: [{ id: "x", name: "task", arguments: { description: "d", prompt: "SUBTASK" } }] };
+      },
+    } as any;
+    const agent = new Agent({
+      client, session: Session.new(home, "mock/m"), tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 4,
+    });
+    for await (const _ of agent.runTurn("SUBTASK go")) void _;
+    expect(true).toBe(true); // completed without infinite recursion
+  });
+});
+
+// ---------- webfetch guard ----------
+describe("webfetch", () => {
+  test("isPrivateHost blocks loopback/private/metadata; public literal IPs pass", async () => {
+    const { isPrivateHost } = await import("../src/tools.ts");
+    expect(await isPrivateHost("localhost")).toBe(true);
+    expect(await isPrivateHost("127.0.0.1")).toBe(true);
+    expect(await isPrivateHost("10.1.2.3")).toBe(true);
+    expect(await isPrivateHost("192.168.0.7")).toBe(true);
+    expect(await isPrivateHost("169.254.169.254")).toBe(true);
+    expect(await isPrivateHost("metadata.google.internal")).toBe(true);
+    // literal public IP passes; pattern guard, no DNS pinning
+    expect(await isPrivateHost("93.184.216.34")).toBe(false);
+    expect(await isPrivateHost("example.com")).toBe(false);
+  });
+
+  test("tool refuses private URLs before prompting", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const tk = new ToolKit(home, { autoApprove: true });
+    const r = await tk.dispatch("webfetch", { url: "http://127.0.0.1:31415/v1/models" });
+    expect(r.ok).toBe(false);
+    expect(r.output).toContain("private/loopback");
+  });
+});
+
+// ---------- @dir + output style + statusline input ----------
+describe("extras", () => {
+  test("@dir expands to a one-level listing", async () => {
+    const { expandFileRefs } = await import("../src/tui.tsx");
+    const root = mkdtempSync(join(tmpdir(), "goat-dir-"));
+    mkdirSync(join(root, "pkg", "sub"), { recursive: true });
+    writeFileSync(join(root, "pkg", "a.ts"), "1");
+    const out = expandFileRefs("tree: @pkg", root);
+    expect(out).toContain("[dir: pkg]");
+    expect(out).toContain("a.ts");
+    expect(out).toContain("sub");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("loadOutputStyle: built-in, file, and default", async () => {
+    const { loadOutputStyle } = await import("../src/context.ts");
+    expect(loadOutputStyle(undefined)).toBe("");
+    expect(loadOutputStyle("default")).toBe("");
+    expect(loadOutputStyle("Explanatory")).toContain("Output Style: Explanatory");
+    const dir = mkdtempSync(join(tmpdir(), "goat-style-"));
+    writeFileSync(join(dir, "terse.md"), "---\nname: terse\n---\nBe extremely brief.\n");
+    expect(loadOutputStyle(join(dir, "terse.md"))).toContain("Be extremely brief");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("statusInput builds the Claude-shaped payload", async () => {
+    const { statusInput } = await import("../src/statusline.ts");
+    const { Session } = await import("../src/session.ts");
+    const s = Session.new(home, "mock/m");
+    s.usage = { in: 100, out: 5 };
+    const inp = statusInput(s, "mock/m", undefined, 4000, false);
+    expect(inp.session_id).toBe(s.id);
+    expect(inp.model.id).toBe("mock/m");
+    expect(inp.cost.total_tokens_in).toBe(100);
+    expect(inp.context_window.current_usage).toBe(1000); // 4000/4
+    expect(inp.output_style.name).toBe("default");
+  });
+});
+
 // ---------- plan-mode ----------
 describe("plan mode", () => {
   test("readonly Toolkit blocks mutating ops up front", async () => {

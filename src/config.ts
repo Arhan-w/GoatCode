@@ -36,6 +36,11 @@ export interface McpRemoteServer {
 }
 export type McpServerConfig = McpStdioServer | McpRemoteServer;
 
+/** Claude Code wire-compatible hook command: JSON on stdin, exit 2 = block. */
+import type { HooksConfig } from "./hooks.ts";
+export type { HookCommand, HookMatcher, HooksConfig } from "./hooks.ts";
+export interface PermissionRules { allow: string[]; deny: string[] }
+
 export interface GoatConfig {
   model: string;
   provider: string; // derived from model
@@ -47,6 +52,14 @@ export interface GoatConfig {
   endpoints: Record<string, CustomEndpoint>;
   mcpServers: Record<string, McpServerConfig>;
   pluginDirs: string[];
+  permissions: PermissionRules;
+  hooks: HooksConfig;
+  /** Shell command that prints a custom status line (JSON on stdin). */
+  statusLine?: { command: string };
+  /** Cheap model routed to for background work (compaction, subagents). */
+  smallModel?: string;
+  /** Output style name or path to a .md file appended to the system prompt. */
+  outputStyle?: string;
   /** Server names that came from the project .mcp.json — never persisted to user config. */
   projectMcpNames: Set<string>;
 }
@@ -107,6 +120,14 @@ export function loadConfig(projectDir: string = process.cwd()): GoatConfig {
     endpoints: {},
     mcpServers: { ...(data.mcpServers ?? {}) },
     pluginDirs: Array.isArray(data.plugins) ? data.plugins : [],
+    permissions: {
+      allow: Array.isArray(data.permissions?.allow) ? data.permissions.allow.map(String) : [],
+      deny: Array.isArray(data.permissions?.deny) ? data.permissions.deny.map(String) : [],
+    },
+    hooks: (data.hooks && typeof data.hooks === "object" ? data.hooks : {}) as HooksConfig,
+    statusLine: data.status_line?.command ? { command: String(data.status_line.command) } : undefined,
+    smallModel: data.small_model ?? data.smallModel ? String(data.small_model ?? data.smallModel) : undefined,
+    outputStyle: data.output_style ?? data.outputStyle ? String(data.output_style ?? data.outputStyle) : undefined,
     projectMcpNames: new Set(),
   };
   for (const [pid, ed] of Object.entries<any>(data.endpoints ?? {})) {
@@ -173,7 +194,12 @@ export function saveConfig(cfg: GoatConfig): void {
     ),
     mcpServers: userMcp,
   };
+  if (cfg.permissions?.allow.length || cfg.permissions?.deny.length) payload.permissions = cfg.permissions;
+  if (cfg.hooks && Object.keys(cfg.hooks).length) payload.hooks = cfg.hooks;
+  if (cfg.statusLine) payload.status_line = { command: cfg.statusLine.command };
   if (cfg.temperature != null) payload.temperature = cfg.temperature;
+  if (cfg.smallModel) payload.small_model = cfg.smallModel;
+  if (cfg.outputStyle) payload.output_style = cfg.outputStyle;
   writeFileSync(configPath(), JSON.stringify(payload, null, 2), "utf8");
 }
 

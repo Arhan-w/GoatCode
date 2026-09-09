@@ -7,6 +7,8 @@ import { buildSystemPrompt } from "./system-prompt.ts";
 import { contentChars, isRetryableLLMError, textOf, type ChatClient, type ContentPart, type Message, type StreamEvent, type ToolCall, type ToolSpec } from "./llm.ts";
 import { Session, summarize } from "./session.ts";
 import { ToolKit, type PermissionFn, type Todo } from "./tools.ts";
+import { fireHooks, MAX_STOP_HOOK_CONTINUES } from "./hooks.ts";
+import { SUBAGENT_MAX_STEPS } from "./constants.ts";
 
 export const COMPACT_TRIGGER_CHARS = 220_000;
 /** Attempt budget for transient LLM failures (429/5xx/network) within one step. */
@@ -45,6 +47,8 @@ export interface AgentDeps {
   maxAttempts?: number;
   /** Per-attempt request deadline in ms (default REQUEST_TIMEOUT_MS). */
   requestTimeoutMs?: number;
+  /** Tools hidden from the model AND refused at dispatch (subagent guardrails). */
+  disallowedTools?: Set<string>;
 }
 
 export class Agent {
@@ -58,6 +62,7 @@ export class Agent {
   retryBaseMs: number;
   maxAttempts: number;
   requestTimeoutMs: number;
+  disallowedTools: Set<string>;
 
   constructor(deps: AgentDeps) {
     this.client = deps.client;
@@ -70,6 +75,7 @@ export class Agent {
     this.retryBaseMs = deps.retryBaseMs ?? RETRY_BASE_MS;
     this.maxAttempts = deps.maxAttempts ?? LLM_MAX_ATTEMPTS;
     this.requestTimeoutMs = deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+    this.disallowedTools = deps.disallowedTools ?? new Set();
   }
 
   private messages(): Message[] {
@@ -93,6 +99,7 @@ export class Agent {
       this.session.title = first.trim().split("\n")[0]?.slice(0, 80) ?? "session";
     }
     let steps = 0;
+    let stopContinues = 0;
     while (steps < this.maxSteps) {
       steps += 1;
       const toolCalls: ToolCall[] = [];
@@ -107,6 +114,21 @@ export class Agent {
       }
       if (!toolCalls.length) {
         this.session.append({ role: "assistant", content: assistantText });
+        // Stop hooks: a blocking hook feeds its reason back as a new user turn
+        // (capped) — Claude's "keep going until the guard is satisfied" model.
+        if (this.tools.hooks?.Stop?.length && stopContinues < MAX_STOP_HOOK_CONTINUES) {
+          const hr = await fireHooks(this.tools.hooks, "Stop", {
+            session_id: this.tools.sessionId, transcript_path: "", cwd: this.tools.root,
+            hook_event_name: "Stop", hookEventName: "Stop",
+            stop_hook_active: stopContinues > 0,
+          } as any, this.tools.sessionId);
+          if (hr.blocked && hr.reason) {
+            stopContinues += 1;
+            yield { kind: "text", text: `\n⟲ Stop hook: continuing (${stopContinues}/${MAX_STOP_HOOK_CONTINUES})\n` };
+            this.session.append({ role: "user", content: `[stop-hook feedback] ${hr.reason}` });
+            continue;
+          }
+        }
         this.session.save();
         yield { kind: "done" };
         return;
@@ -117,7 +139,14 @@ export class Agent {
       this.session.append(assistantMsg as Message);
       for (const call of toolCalls) {
         yield { kind: "tool_start", tool: call.name, args: call.arguments };
-        const result = await this.tools.dispatch(call.name, call.arguments);
+        let result;
+        if (call.name === "task") {
+          if (this.disallowedTools.has("task"))
+            result = { ok: false, output: "subagents cannot spawn subagents" };
+          else result = await this.spawnSubagent(call.arguments);
+        } else {
+          result = await this.tools.dispatch(call.name, call.arguments);
+        }
         this.session.append({
           role: "tool",
           content: result.content ?? result.output.slice(0, 60_000),
@@ -151,7 +180,8 @@ export class Agent {
       const onUserAbort = () => ctrl.abort();
       signal?.addEventListener("abort", onUserAbort);
       try {
-        for await (const ev of this.streamOnce(ctrl.signal)) {
+        const specs = this.tools.specs().filter((s) => !this.disallowedTools.has(s.name));
+      for await (const ev of this.streamOnce(ctrl.signal, specs)) {
           if (ev.kind === "text" || ev.kind === "thinking" || ev.kind === "tool_calls") sawContent = true;
           yield ev;
         }
@@ -185,9 +215,9 @@ export class Agent {
     }
   }
 
-  private async *streamOnce(signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+  private async *streamOnce(signal?: AbortSignal, specs?: ToolSpec[]): AsyncGenerator<AgentEvent> {
     for await (const ev of this.client.streamChat(
-      this.messages(), this.tools.specs(),
+      this.messages(), specs ?? this.tools.specs(),
       { model: modelId(this.session.model), maxTokens: this.maxTokens, temperature: this.temperature, signal },
     )) {
       if (ev.textDelta) yield { kind: "text", text: ev.textDelta };
@@ -200,6 +230,40 @@ export class Agent {
       else if (ev.toolCalls) yield { kind: "tool_calls", toolCalls: ev.toolCalls };
       else if (ev.error) yield { kind: "error", text: ev.error };
     }
+  }
+
+  /**
+   * Sub-agent: fresh context (no history bleed), shared ToolKit so undo,
+   * permission rules, hooks and MCP all apply. Explore mode = read-only
+   * toolset. Returns the sub-agent's final text as the tool result.
+   */
+  private async spawnSubagent(args: Record<string, unknown>): Promise<{ ok: boolean; output: string }> {
+    const prompt = String(args.prompt ?? "").trim();
+    if (!prompt) return { ok: false, output: "task requires a prompt" };
+    const description = String(args.description ?? "subagent").slice(0, 60);
+    const explore = String(args.subagent_type ?? "") === "explore";
+    const disallowed = new Set(["task", "write", "edit", "undo", ...(explore ? ["bash"] : [])]);
+    const sub = Session.new(this.session.cwd, this.session.model);
+    sub.title = `subagent: ${description}`;
+    const child = new Agent({
+      client: this.client, session: sub, tools: this.tools,
+      maxTokens: this.maxTokens, temperature: this.temperature,
+      maxSteps: SUBAGENT_MAX_STEPS, extraSystem: this.extraSystem,
+      retryBaseMs: this.retryBaseMs, maxAttempts: this.maxAttempts,
+      requestTimeoutMs: this.requestTimeoutMs, disallowedTools: disallowed,
+    });
+    let text = "";
+    let stepsUsed = 0;
+    let error = "";
+    for await (const ev of child.runTurn(prompt)) {
+      if (ev.kind === "text") text += ev.text;
+      else if (ev.kind === "tool_start") stepsUsed++;
+      else if (ev.kind === "error") error = ev.text;
+    }
+    const final = text.trim();
+    if (!final)
+      return { ok: false, output: `subagent "${description}" produced no answer${error ? `: ${error}` : ""}` };
+    return { ok: true, output: `[subagent ${description} · ${stepsUsed} tool uses]\n${final.slice(0, 30_000)}` };
   }
 
   private maybeCompact(): void {

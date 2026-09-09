@@ -8,7 +8,30 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { decide } from "./permissions.ts";
+import { fireHooks, type HooksConfig } from "./hooks.ts";
+import { MAX_WEBFETCH_BYTES, WEBFETCH_TIMEOUT_MS } from "./constants.ts";
 import type { ContentPart, ToolSpec } from "./llm.ts";
+
+/** SSRF guard: refuse loopback / private / link-local / cloud-metadata hosts.
+ *  Pattern-based (literal IPs + reserved suffixes); hostnames that resolve to
+ *  private addresses are not caught — same tradeoff as most CLI fetch tools. */
+export async function isPrivateHost(host: string): Promise<boolean> {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local")) return true;
+  if (/^0+$/.test(h.replace(/\./g, ""))) return true;
+  if (/^(fe80|fc|fd|::1)/i.test(h)) return true; // link-local / ULA / IPv6 loopback
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    if (a === 127 || a === 10 || a === 0) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true; // cloud metadata
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  }
+  return false;
+}
 
 export const MAX_READ_BYTES = 128_000;
 export const MAX_BASH_OUTPUT = 32_000;
@@ -96,17 +119,24 @@ export class ToolKit {
   permission: PermissionFn | null;
   autoApprove: boolean;
   readonly = false;
+  /** settings.json-style allow/deny rules, consulted before the prompt. */
+  rules: { allow: string[]; deny: string[] } | undefined;
+  /** Claude-compatible hooks (set from config per turn; undefined = off). */
+  hooks: HooksConfig | undefined;
+  sessionId = "goat";
+  private hookAllowNext = false;
   external = new Map<string, ExternalTool>();
 
   private snaps: SnapRecord[] = [];
   private bg = new Map<string, BgTask>();
   private todos: Todo[] = [];
 
-  constructor(root: string, opts: { permission?: PermissionFn; autoApprove?: boolean; readonly?: boolean } = {}) {
+  constructor(root: string, opts: { permission?: PermissionFn; autoApprove?: boolean; readonly?: boolean; rules?: { allow: string[]; deny: string[] } } = {}) {
     this.root = resolve(root);
     this.permission = opts.permission ?? null;
     this.autoApprove = opts.autoApprove ?? false;
     this.readonly = opts.readonly ?? false;
+    this.rules = opts.rules;
   }
 
   /** Membership, not string-prefix: "/root" prefixes "/rootkit" but isn't its parent. */
@@ -136,16 +166,45 @@ export class ToolKit {
   async dispatch(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     try {
       const ext = this.external.get(name);
+      // Claude wire-compat: file tools report their arg as file_path
+      const hookArgs = { ...args };
+      if ((name === "read" || name === "write" || name === "edit") && args.path !== undefined)
+        hookArgs.file_path = args.path;
+      const hookPayload = () => ({
+        session_id: this.sessionId, transcript_path: "", cwd: this.root,
+        hook_event_name: "PreToolUse" as const, hookEventName: "PreToolUse" as const,
+        tool_name: name, tool_input: hookArgs,
+      });
+      // PreToolUse hooks: exit-2 blocks; permissionDecision can skip the prompt
+      this.hookAllowNext = false;
+      if (this.hooks?.PreToolUse?.length) {
+        const hr = await fireHooks(this.hooks, "PreToolUse", hookPayload(), this.sessionId);
+        if (hr.blocked) return { ok: false, output: `blocked by PreToolUse hook: ${hr.reason ?? "(no reason)"}` };
+        if (hr.decision === "deny") return { ok: false, output: `denied by PreToolUse hook: ${hr.reason ?? ""}` };
+        if (hr.decision === "allow") this.hookAllowNext = true;
+        if (hr.updatedInput) { args = hr.updatedInput; } // hook rewrote the tool input
+      }
+      let result: ToolResult;
       if (ext) {
-        if (ext.mutating) {
+        if (ext.mutating && !this.hookAllowNext) {
           const denied = await this.ask(name, args);
           if (denied) return denied;
         }
-        return await ext.run(args, signal);
+        result = await ext.run(args, signal);
+      } else {
+        const handler = (this as any)[`tool_${name}`];
+        if (!handler) result = { ok: false, output: `unknown tool: ${name}` };
+        else result = await handler.call(this, args, signal);
       }
-      const handler = (this as any)[`tool_${name}`];
-      if (!handler) return { ok: false, output: `unknown tool: ${name}` };
-      return await handler.call(this, args, signal);
+      // PostToolUse hooks (informational + exit-2 blocking of a completed call's use)
+      if (this.hooks?.PostToolUse?.length) {
+        const hr = await fireHooks(this.hooks, "PostToolUse", {
+          ...hookPayload(), hook_event_name: "PostToolUse",
+          tool_response: { stdout: result.output.slice(0, 30_000), stderr: "", interrupted: false },
+        }, this.sessionId);
+        if (hr.blocked) result = { ok: false, output: `PostToolUse hook flagged output: ${hr.reason ?? "(exit 2)"}` };
+      }
+      return result;
     } catch (e: any) {
       return { ok: false, output: `${e?.name ?? "Error"}: ${e?.message ?? e}` };
     }
@@ -155,6 +214,10 @@ export class ToolKit {
     // plan mode: mutating tools never run — explain how to leave the mode
     if (this.readonly)
       return { ok: false, output: `${tool} blocked by plan mode (read-only). Shift+tab to switch to default/accept-edits mode, or present the plan and let the user approve it.` };
+    // settings-style rules: deny beats allow beats asking
+    const verdict = decide(this.rules, tool, args);
+    if (verdict === "deny") return { ok: false, output: `${tool} denied by permission rule (see "permissions.deny" in config)` };
+    if (verdict === "allow" || this.hookAllowNext) return null;
     if (this.autoApprove) return null;
     if (!this.permission)
       return { ok: false, output: `permission required but no prompt available for ${tool}` };
@@ -340,6 +403,45 @@ export class ToolKit {
     });
   }
 
+  async tool_webfetch(args: Record<string, any>): Promise<ToolResult> {
+    const raw = String(args.url ?? "");
+    let url: URL;
+    try { url = new URL(raw); } catch { return { ok: false, output: `invalid url: ${raw}` }; }
+    if (url.protocol !== "http:" && url.protocol !== "https:")
+      return { ok: false, output: `only http(s) allowed, got ${url.protocol}` };
+    // SSRF guard: block private/localhost targets (skip permission prompt for them)
+    const host = url.hostname.toLowerCase();
+    if (await isPrivateHost(host))
+      return { ok: false, output: `refused private/loopback address: ${host}` };
+    const denied = await this.ask("webfetch", args); // WebFetch(domain:x) rules apply
+    if (denied) return denied;
+    try {
+      const res = await fetch(url.toString(), {
+        redirect: "follow", signal: AbortSignal.timeout(WEBFETCH_TIMEOUT_MS),
+        headers: { "user-agent": "goatcode/2.0 (+https://github.com/Arhan-w/GoatCode)" },
+      });
+      if (!res.ok) return { ok: false, output: `HTTP ${res.status} ${res.statusText}` };
+      const ct = res.headers.get("content-type") ?? "";
+      if (!/text|json|xml|markdown|html/.test(ct))
+        return { ok: false, output: `unsupported content-type: ${ct}` };
+      let text = await res.text();
+      if (ct.includes("html")) {
+        text = text
+          .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<!--[\s\S]*?-->/gi, " ")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&amp;|&#38;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ")
+          .replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+      }
+      const clipped = text.slice(0, MAX_WEBFETCH_BYTES);
+      const more = text.length > clipped.length ? `\n... [truncated from ${text.length} bytes]` : "";
+      const ask = args.prompt ? `\n\n[Look for: ${String(args.prompt).slice(0, 300)}]` : "";
+      return { ok: true, output: `# ${url.hostname} — ${ct.split(";")[0]}\n${clipped}${more}${ask}` };
+    } catch (e: any) {
+      return { ok: false, output: `fetch failed: ${e?.message ?? e}` };
+    }
+  }
+
   tool_undo(): ToolResult {
     if (this.readonly)
       return { ok: false, output: "undo blocked by plan mode — the user can still run /undo from the prompt" };
@@ -471,6 +573,18 @@ function builtinSpecs(): ToolSpec[] {
       parameters: { type: "object", properties: {} } },
     { name: "glob", description: "Find files by pattern, e.g. 'src/**/*.ts'.",
       parameters: { type: "object", properties: { pattern: { type: "string" } }, required: ["pattern"] } },
+    { name: "task", description:
+      "Launch a focused sub-agent with a fresh context that shares your tools. It has ZERO knowledge of this conversation — brief it completely. Use for research/exploration (subagent_type 'explore' = read-only) or self-contained multi-step work. It returns one final report; you must summarize it for the user.",
+      parameters: { type: "object", properties: {
+        description: { type: "string", description: "3-5 word label" },
+        prompt: { type: "string", description: "Full task brief for the sub-agent" },
+        subagent_type: { type: "string", enum: ["explore", "general"], description: "explore = read-only research; general = full tools" },
+      }, required: ["description", "prompt"] } },
+    { name: "webfetch", description: "Fetch a URL and return readable text. Blocked for private/localhost addresses.",
+      parameters: { type: "object", properties: {
+        url: { type: "string", description: "http(s) URL" },
+        prompt: { type: "string", description: "What to look for (returned alongside the text; text is truncated to 200 KB)" },
+      }, required: ["url"] } },
     { name: "todo", description:
       "Create and manage a structured task list for the current work. Use proactively for multi-step tasks (3+ steps); update statuses in real time — mark a task in_progress BEFORE starting it and completed IMMEDIATELY after, exactly one in_progress at a time. Skip it for single trivial tasks. Do not batch completions. The list is shown live to the user.",
       parameters: { type: "object", properties: {

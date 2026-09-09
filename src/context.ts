@@ -36,3 +36,31 @@ export function projectMemory(cwd: string): string {
 export function buildExtraSystem(skills: SkillDef[], cwd: string): string {
   return [projectMemory(cwd), skillsBlock(skills)].filter(Boolean).join("\n\n");
 }
+
+/**
+ * Output styles — Claude-compatible: a style name or a .md file whose body
+ * gets appended to the system prompt (frontmatter name/description optional).
+ * Built-ins: "default" (nothing), "Explanatory". Custom: ~/.goatcode/output-styles/<name>.md or a path.
+ */
+export function loadOutputStyle(nameOrPath?: string): string {
+  if (!nameOrPath || nameOrPath === "default") return "";
+  if (nameOrPath === "Explanatory")
+    return "# Output Style: Explanatory\nAfter each tool call, add a 1-2 line note explaining what you found and why it matters, so the user learns the codebase as we work.";
+  const candidates = [
+    nameOrPath,
+    join(appDir(), "output-styles", nameOrPath + ".md"),
+    join(process.cwd(), ".goatcode", "output-styles", nameOrPath + ".md"),
+  ];
+  for (const p of candidates) {
+    try {
+      if (existsSync(p)) {
+        let text = readFileSync(p, "utf8");
+        const fm = text.match(/^---\s*\n[\s\S]*?\n---\s*\n?/);
+        if (fm) text = text.slice(fm[0].length);
+        const label = nameOrPath.split(/[\\/]/).pop() ?? nameOrPath;
+        return `# Output Style: ${label.replace(/\.md$/, "")}\n${text.trim()}`;
+      }
+    } catch { /* skip */ }
+  }
+  return "";
+}

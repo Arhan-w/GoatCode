@@ -10,7 +10,7 @@
  */
 import { Box, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
-import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve as resolvePath } from "node:path";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Agent, type AgentEvent } from "./agent.ts";
@@ -21,9 +21,11 @@ import { ResolveError, resolve } from "./runtime.ts";
 import { Session } from "./session.ts";
 import { loadSkills, loadSkillBody, type SkillDef } from "./skills/loader.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
-import { buildExtraSystem } from "./context.ts";
+import { buildExtraSystem, loadOutputStyle } from "./context.ts";
 import { loadMcpFromConfig, type McpClient } from "./mcp/client.ts";
 import { ToolKit, IMAGE_TYPES, MAX_IMAGE_BYTES } from "./tools.ts";
+import { runStatusLine, statusInput } from "./statusline.ts";
+import { contentChars } from "./llm.ts";
 import type { ContentPart } from "./llm.ts";
 import type { Todo } from "./tools.ts";
 
@@ -71,6 +73,12 @@ export function expandFileRefs(text: string, cwd: string, push?: (n: ReactNode) 
       const rel = relative(cwd, abs);
       if (rel === "" || rel.startsWith("..")) return `${pre}@${ref}`; // outside root — leave as-is
       if (!existsSync(abs)) { push?.(<Text color={RED}>  ⚠ @{ref} not found</Text>); return `${pre}@${ref}`; }
+      if (statSync(abs).isDirectory()) {
+        // @dir → one-level entry listing (Claude-compatible)
+        const names = readdirSync(abs).slice(0, 1000);
+        const more = readdirSync(abs).length > 1000 ? `\n… and ${readdirSync(abs).length - 1000} more entries` : "";
+        return `${pre}\n\n[dir: ${ref}]\n${names.join("\n")}${more}\n`;
+      }
       const body = readFileSync(abs, "utf8").slice(0, 32_000);
       return `${pre}\n\n[file: ${ref}]\n\`\`\`\n${body}\n\`\`\`\n`;
     } catch {
@@ -160,6 +168,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [compSel, setCompSel] = useState(0);
   const [thinkLine, setThinkLine] = useState("");
   const [todos, setTodos] = useState<Todo[]>([]);
+  const [statusLines, setStatusLines] = useState<string[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const lastCtrlC = useRef(0);
@@ -230,6 +239,9 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       // plan mode: read-only — mutating tools are denied up front
       tools.readonly = m === "plan";
       tools.autoApprove = m === "bypass";
+      tools.rules = cfgRef.current.permissions;
+      tools.hooks = cfgRef.current.hooks;
+      tools.sessionId = sessionRef.current.id;
       // acceptEdits auto-approves file edits, still asks for bash (Claude semantics)
       tools.permission = (t, a) =>
         m === "acceptEdits" && (t === "write" || t === "edit") ? true : askPermission(t, a);
@@ -240,7 +252,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         client: r.client, session: sessionRef.current, tools,
         maxTokens: cfgRef.current.maxTokens, temperature: cfgRef.current.temperature,
         maxSteps: cfgRef.current.maxSteps,
-        extraSystem: buildExtraSystem(skills, sessionRef.current.cwd),
+        extraSystem: [buildExtraSystem(skills, sessionRef.current.cwd),
+          loadOutputStyle(cfgRef.current.outputStyle)].filter(Boolean).join("\n\n"),
       });
     } catch (e) {
       if (e instanceof ResolveError) push(<Text color={RED}>{String(e.message)}</Text>);
@@ -523,6 +536,22 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     } else setCompletions([]);
   }, [input]);
 
+  // custom statusline: refresh on mode/session changes, during thinking, and
+  // every 12s otherwise (5s command timeout — cheap enough)
+  useEffect(() => {
+    const cmd = cfg.statusLine?.command;
+    if (!cmd) { setStatusLines([]); return; }
+    let cancelled = false;
+    const tick = async () => {
+      const used = sessionRef.current.messages.reduce((s, m) => s + contentChars(m.content), 0);
+      const lines = await runStatusLine(cmd, statusInput(sessionRef.current, cfg.model, cfg.outputStyle, used, thinking));
+      if (!cancelled && lines) setStatusLines(lines);
+    };
+    void tick();
+    const id = setInterval(() => void tick(), thinking ? 3000 : 12_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [cfg.statusLine?.command, thinking, session, mode, cfg.model, cfg.outputStyle]);
+
   const frame = SPINNER_FRAMES[Math.floor(elapsed / 120) % SPINNER_FRAMES.length];
 
   return (
@@ -569,18 +598,24 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         )}
       </Box>
 
-      <Box paddingLeft={1}>
-        <Text dimColor color={DIM}>
-          <Text color={mode === "default" ? DIM : ACCENT}>{MODE_LABEL[mode]}</Text>
-          {"  (shift+tab to cycle)  ·  "}{cfg.model}
-          {"  ·  "}{shortPath(session.cwd)}
-          {"  ·  "}
-          {mcp?.servers.size ? `${mcp.servers.size} mcp · ` : ""}
-          {skills.length ? `${skills.length} skills · ` : ""}
-          <Text color={ACCENT}>/help</Text>
-          <Text dimColor color={DIM}> · ctrl+t tasks · /undo</Text>
-        </Text>
-      </Box>
+      {cfg.statusLine?.command && statusLines.length ? (
+        <Box flexDirection="column" paddingLeft={1}>
+          {statusLines.map((l, i) => <Text key={i} dimColor color={DIM}>{l}</Text>)}
+        </Box>
+      ) : (
+        <Box paddingLeft={1}>
+          <Text dimColor color={DIM}>
+            <Text color={mode === "default" ? DIM : ACCENT}>{MODE_LABEL[mode]}</Text>
+            {"  (shift+tab to cycle)  ·  "}{cfg.model}
+            {"  ·  "}{shortPath(session.cwd)}
+            {"  ·  "}
+            {mcp?.servers.size ? `${mcp.servers.size} mcp · ` : ""}
+            {skills.length ? `${skills.length} skills · ` : ""}
+            <Text color={ACCENT}>/help</Text>
+            <Text dimColor color={DIM}> · ctrl+t tasks · /undo</Text>
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }

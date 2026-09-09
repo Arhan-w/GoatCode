@@ -24,7 +24,7 @@ import { ToolKit } from "./tools.ts";
 import { Session } from "./session.ts";
 import { loadSkills } from "./skills/loader.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
-import { buildExtraSystem } from "./context.ts";
+import { buildExtraSystem, loadOutputStyle } from "./context.ts";
 import { join } from "node:path";
 import type { GoatConfig } from "./config.ts";
 
@@ -206,7 +206,8 @@ async function main(): Promise<number> {
     const quiet = has("-q") ?? false;
     const r = await resolve(cfg, registry);
     const session = Session.new(process.cwd(), cfg.model);
-    const tools = new ToolKit(process.cwd(), { autoApprove: cfg.autoApprove });
+    const tools = new ToolKit(process.cwd(), { autoApprove: cfg.autoApprove, rules: cfg.permissions });
+    tools.hooks = cfg.hooks;
     let mcp = null;
     if (Object.keys(cfg.mcpServers).length) {
       try {
@@ -219,7 +220,8 @@ async function main(): Promise<number> {
     const agent = new Agent({
       client: r.client, session, tools,
       maxTokens: cfg.maxTokens, temperature: cfg.temperature, maxSteps: cfg.maxSteps,
-      extraSystem: buildExtraSystem(allSkills(cfg), process.cwd()),
+      extraSystem: [buildExtraSystem(allSkills(cfg), process.cwd()),
+        loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
     });
     let out = "";
     const expandedPrompt = buildUserContent(prompt, process.cwd());
