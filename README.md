@@ -10,8 +10,11 @@ ChatGPT, Gemini, Copilot, Kimi, Grok → working API credentials), streaming
 markdown under a live spinner, sandboxed tools with permission prompts,
 **MCP servers**, **SKILL.md skills**, and **plugins**.
 
+![GoatCode live](docs/assets/demo.gif)
+
 [Install](#install) · [Quick start](#quick-start) · [The TUI](#the-tui) ·
-[MCP](#mcp-servers) · [Skills](#skills) · [Providers](#providers) ·
+[Desktop control](#desktop-control) · [MCP](#mcp-servers) · [Skills](#skills) ·
+[Providers](#providers) ·
 [OAuth](#subscription-oauth)
 
 </div>
@@ -26,9 +29,10 @@ markdown under a live spinner, sandboxed tools with permission prompts,
 | TUI | rich + prompt_toolkit | **Ink/React** — Claude Code-style: ❯ box, spinner verbs, ●/⎿ tools, numbered permission dialog |
 | Modes | auto-approve toggle | **4-mode cycle** (shift+tab): ask · accept-edits · plan · bypass |
 | Extensibility | — | **MCP servers** (stdio/http/sse) · **skills** (SKILL.md) · **plugins** |
+| Desktop | — | **see the screen + drive real apps** — `screenshot`/`computer` tools, cua-driver or native (click, type, keys, launch, clipboard) |
 | Context | — | **@file references** · **!bash mode** · **# memory** → GOAT.md |
 | Resilience | one-shot failure | **retry w/ jittered backoff** on 429/5xx/network, `retry-after` honored, esc interrupts mid-request |
-| Engine | 60 tests | same 4 wire formats, OAuth flows, sessions, compaction, **vision input** — **54 TS tests + full e2e** |
+| Engine | 60 tests | same 4 wire formats, OAuth flows, sessions, compaction, **vision input** — **78 tests + full e2e** |
 
 ## Install
 
@@ -97,6 +101,10 @@ Claude Code's interaction model, GoatCode's engine:
 - **shift+tab / ctrl+o mode cycle** — `ask before edits → ⏵⏵ accept edits → ⏸ plan → ⏩ bypass`
 - **/** completion menu with descriptions for every command
 - **@file** injects file contents · **!cmd** runs bash inline · **# note** saves to GOAT.md
+- **websearch** — the model looks things up live (DuckDuckGo, no API key) and
+  **webfetch**es the best result for details
+- **small_model** — route background work (compaction, explore sub-agents) to a
+  cheap model while the main turn stays on the frontier one
 
 | Key / command | What |
 |---|---|
@@ -125,6 +133,45 @@ blocks. `Ctrl+C` twice to exit; one press warns first.
 **Plan mode is enforced, not decorative** — in `⏸ plan`, every mutating tool
 (write/edit/bash) is denied at dispatch with instructions to leave the mode.
 
+**Parallel tool calls** — when the model asks for five `read`s, they fan out
+concurrently and land back in transcript order. Exploring a codebase costs one
+round of latency, not five.
+
+## Desktop control
+
+GoatCode doesn't just edit files — it can **see your screen and drive real
+apps**. Two tools, one agent loop:
+
+- `screenshot` — captures the desktop and *attaches the pixels to the model's
+  next turn*. Vision models literally see what you see.
+- `computer` — `click` / `double_click` / `right_click` / `type` / `key` /
+  `scroll` / `launch` / `windows` / `clipboard`, with coordinates read straight
+  off the screenshot.
+
+Backends auto-detect, best available wins:
+
+| Backend | Delivery | Install |
+|---|---|---|
+| **cua-driver** (preferred) | background — clicks/types route to the target window via UIA/PostMessage; your cursor and focus never move | `cua-driver` one-time install |
+| PowerShell + Win32 | native SendInput/GDI, foreground | none — Windows ships with it |
+| osascript / screencapture | AppleScript + cliclick | macOS stock (cliclick for clicks) |
+| xdotool / xclip | X11 input + clip | Linux stock |
+
+```console
+❯ open notepad and write a haiku about goats
+● computer  launch notepad
+  ⎿ completed  [cua-driver] launched notepad (pid 9452)
+● screenshot
+  ⎿ completed  screen captured (1366x768)
+● computer  type · window_title "Untitled - Notepad"
+  ⎿ completed  [cua-driver] typed 42 chars
+```
+
+Permission-gated by the same rules as everything else (`Computer(...)` allow/
+deny rules apply), blocked outright in plan mode, never handed to read-only
+sub-agents, and a hard never-send list refuses `Win+L`, `Ctrl+Alt+Del` and
+friends no matter what the model requests.
+
 ## Hooks, rules, styles — Claude-compatible config
 
 Drop-in compatible with Claude Code's `settings.json` shapes, in
@@ -134,7 +181,7 @@ Drop-in compatible with Claude Code's `settings.json` shapes, in
 {
   "permissions": {
     "allow": ["Bash(git add:*)", "Edit(src/**)", "WebFetch(domain:docs.rs)"],
-    "deny":  ["Bash(git push*)", "Read(~/.ssh/**)"]
+    "deny":  ["Bash(git push*)", "Read(~/.ssh/**)", "Computer(type)"]
   },
   "hooks": {
     "PreToolUse":  [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "my-guard" }] }],
@@ -257,9 +304,13 @@ Tokens live in `~/.goatcode/credentials.json` and auto-refresh before expiry.
 
 ## Safety model
 
-- **Permission prompts** — write/edit/bash show the exact target; plan mode
-  blocks mutations at the dispatcher; bypass is explicit and labeled in the
-  status bar.
+- **Permission prompts** — write/edit/bash/computer show the exact target;
+  plan mode blocks mutations and desktop input at the dispatcher; bypass is
+  explicit and labeled in the status bar.
+- **Desktop guardrails** — every `computer`/`screenshot` call is permission-
+  gated and rule-gated (`Computer(...)`); a never-send list hard-refuses
+  `Win+L` / `Ctrl+Alt+Del` / force-quit combos; sub-agents never get the
+  desktop at all.
 - **Path sandbox** — file tools and @refs reject anything outside the project
   root (membership check, not string prefix).
 - **Undo checkpoints** — every write/edit snapshots before/after; `/undo`
@@ -274,14 +325,14 @@ Tokens live in `~/.goatcode/credentials.json` and auto-refresh before expiry.
 |---|---|
 | Cold start (`goat --version`) | **~0.6 s** (binary) |
 | Binary | single file, no runtime install |
-| Tests | 54 bun tests + live e2e under a real ConPTY (providers, MCP, skills, plugins, agent loop, undo, retry, timeout, plan panel, vision) |
+| Tests | 78 bun tests + live e2e under a real ConPTY (providers, MCP, skills, plugins, agent loop, undo, retry, timeout, plan panel, vision, desktop control, websearch, parallel tools, small-model routing) |
 | Type check | `tsc --noEmit` clean, strict |
 
 ## Development
 
 ```bash
 bun install
-bun test                    # 54 tests, ~6s, no network
+bun test                    # 78 tests, ~6s, no network
 bunx tsc --noEmit           # strict type check
 bun run src/index.ts        # dev TUI
 bun build src/index.ts --compile --outfile dist/goat   # ship it

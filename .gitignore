@@ -10,3 +10,7 @@ scripts/pty-plan.txt
 scripts/red.png
 scripts/asset-*.png
 scripts/pty-vision.txt
+.goat/
+.goatdemo-home/
+.goatdemo-proj/
+docs/assets/frames/

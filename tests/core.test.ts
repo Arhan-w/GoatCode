@@ -1268,3 +1268,28 @@ describe("small model", () => {
     expect(mainCalls).toBe(0);
   });
 });
+
+// ---------- Computer() permission rules ----------
+describe("computer rules", () => {
+  test("Computer(type) deny blocks only typing; bare Computer blocks all", async () => {
+    const { decide } = await import("../src/permissions.ts");
+    const denyType = { allow: [], deny: ["Computer(type)"] };
+    expect(decide(denyType, "computer", { action: "type", text: "x" })).toBe("deny");
+    expect(decide(denyType, "computer", { action: "click", x: 1, y: 2 })).toBe("ask");
+    const denyAll = { allow: [], deny: ["Computer"] };
+    expect(decide(denyAll, "computer", { action: "click", x: 1, y: 2 })).toBe("deny");
+    const denyClick = { allow: [], deny: ["Computer(click)"] };
+    expect(decide(denyClick, "computer", { action: "double_click", x: 1, y: 2 })).toBe("deny");
+    expect(decide(denyClick, "computer", { action: "key", combo: "ctrl+s" })).toBe("ask");
+  });
+
+  test("Toolkit honors a Computer(type) deny end-to-end", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-crule-"));
+    const tk = new ToolKit(root, { rules: { allow: [], deny: ["Computer(type)"] }, autoApprove: false });
+    const r = await tk.dispatch("computer", { action: "type", text: "hi" });
+    expect(r.ok).toBe(false);
+    expect(r.output).toContain("denied by permission rule");
+    rmSync(root, { recursive: true, force: true });
+  });
+});

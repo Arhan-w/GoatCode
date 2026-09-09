@@ -1,9 +1,10 @@
 /**
- * Agent tools: read, write, edit, bash, undo, tasks, glob, grep — sandboxed
- * to project root, with a permission callback for mutating ops. Write/edit
- * snapshot the file first so /undo can revert; bash supports background:true
- * for long-running jobs. External tools (MCP servers) register through the
- * same dispatch table.
+ * Agent tools: read, write, edit, bash, undo, tasks, glob, grep, webfetch,
+ * websearch, screenshot, computer — sandboxed to project root, with a
+ * permission callback for mutating ops. Write/edit snapshot the file first
+ * so /undo can revert; bash supports background:true for long-running jobs;
+ * screenshot/computer drive the real desktop (see computer.ts). External
+ * tools (MCP servers) register through the same dispatch table.
  */
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";

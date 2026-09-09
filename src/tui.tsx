@@ -705,7 +705,7 @@ function Welcome({ cfg, cwd }: { cfg: GoatConfig; cwd: string }) {
       <Text>
         <Text color={ACCENT}>{goat.map((l, i) => l + "\n").join("")}</Text>
         <Text color={ACCENT} bold>  GoatCode</Text>
-        <Text dimColor color={DIM}>  v2.0  ·  every provider, one terminal</Text>
+        <Text dimColor color={DIM}>  v2.1  ·  every provider, one terminal</Text>
       </Text>
       <Text dimColor color={DIM}>  model {cfg.model}</Text>
       <Text dimColor color={DIM}>  path  {shortPath(cwd)}</Text>

@@ -83,6 +83,13 @@ export function ruleMatches(rule: Rule, tool: string, args: Record<string, unkno
       }
       return url.startsWith(pat);
     }
+    case "computer": {
+      // Computer(type) matches the type action; Computer(click) covers the
+      // click variants; bare Computer matches everything.
+      const action = String(args.action ?? "");
+      if (pat === "click") return ["click", "double_click", "right_click"].includes(action);
+      return action === pat;
+    }
     default:
       return false; // arg-bearing rules only defined for known tools
   }
