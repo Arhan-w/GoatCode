@@ -54,12 +54,18 @@ GoatCode.
 
 ## Install
 
-**One command — installs `goat` globally on PATH (Windows, Linux, macOS):**
-
 ```bash
+npm install -g goatcode     # any OS with node/npm — fetches the right binary
+```
+
+or, without npm (PowerShell / curl):
+
+```powershell
 # Windows (PowerShell)
 powershell -c "irm https://raw.githubusercontent.com/Arhan-w/GoatCode/v2-typescript/install.ps1 | iex"
+```
 
+```bash
 # Linux / macOS / Git-Bash (curl)
 curl -fsSL https://raw.githubusercontent.com/Arhan-w/GoatCode/v2-typescript/install.sh | bash
 ```
@@ -374,6 +380,20 @@ bun run src/index.ts        # dev TUI
 bun build src/index.ts --compile --outfile dist/goat   # ship it
 ```
 
+### Releasing
+
+Bump the version in `package.json`, `src/index.ts` (`--version`),
+`src/statusline.ts`, and `npm-package/package.json` (must match the tag —
+the npm wrapper resolves its binary from `v<version>`), update
+[CHANGELOG.md](CHANGELOG.md), then:
+
+```bash
+git commit -am "vX.Y.Z — <summary>" && git tag vX.Y.Z && git push origin HEAD:v2-typescript vX.Y.Z
+```
+
+CI cross-compiles 5 platforms and publishes the GitHub release;
+`npm publish ./npm-package` ships the wrapper.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) and the full [CHANGELOG](CHANGELOG.md).

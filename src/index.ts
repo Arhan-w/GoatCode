@@ -73,7 +73,43 @@ async function main(): Promise<number> {
       for (const [k, meta] of Object.entries(OAUTH_PROVIDERS)) console.log(`  ${k.padEnd(16)} ${meta.label}`);
       return 0;
     }
-    if (!pid) { console.log("usage: goat auth <provider> --key <K> | --oauth"); return 1; }
+    if (!pid) {
+      // interactive picker: nobody memorizes provider ids
+      const opts = Object.entries(OAUTH_PROVIDERS);
+      console.log("Which provider do you want to authenticate?");
+      opts.forEach(([k, meta], i) => console.log(`  ${String(i + 1).padStart(2)}. ${k.padEnd(16)} ${meta.label}`));
+      console.log(`   ${opts.length + 1}. other — paste an API key for any provider id`);
+      const pick = (await io.prompt("goat auth> ")).trim();
+      const n = Number(pick);
+      if (Number.isInteger(n) && n >= 1 && n <= opts.length) {
+        const [key, meta] = opts[n - 1];
+        console.log(`\n${meta.label}`);
+        console.log(`  browser/device login:  goat auth ${key} --oauth`);
+        console.log(`  paste API key instead: goat auth ${key} --key <K>`);
+        const how = (await io.prompt("goat auth> (o)auth or (k)ey? ")).trim().toLowerCase();
+        if (how.startsWith("o")) {
+          const flow = meta.flow ?? "browser";
+          const cred = flow === "device" ? await loginDevice(key, io)
+            : flow === "import" ? await loginImport(key, io)
+            : await loginOauth(key, io);
+          registry.store.put(key, cred);
+          console.log(`logged in to ${key} — try: goat -m ${key}/... "hello"`);
+          return 0;
+        }
+        const k2 = (await io.prompt("paste API key: ")).trim();
+        if (!k2) { console.log("no key entered"); return 1; }
+        registry.store.put(key, { kind: "api_key", apiKey: k2, expiresAt: 0 });
+        console.log(`stored API key for ${key}`);
+        return 0;
+      }
+      const other = (await io.prompt("provider id (see: goat providers): ")).trim();
+      if (!other) { console.log("no provider entered"); return 1; }
+      const k3 = (await io.prompt("paste API key: ")).trim();
+      if (!k3) { console.log("no key entered"); return 1; }
+      registry.store.put(other, { kind: "api_key", apiKey: k3, expiresAt: 0 });
+      console.log(`stored API key for ${other} — try: goat -m ${other}/<model> "hello"`);
+      return 0;
+    }
     const key = flag("--key");
     if (key) { registry.store.put(pid, { kind: "api_key", apiKey: key, expiresAt: 0 }); console.log(`stored API key for ${pid}`); return 0; }
     if (has("--oauth")) {
