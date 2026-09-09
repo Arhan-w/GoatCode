@@ -87,6 +87,9 @@ Claude Code's interaction model, GoatCode's engine:
 - **live plan panel** — the agent's todo list pinned under the prompt:
   `▸ Running tests` while in progress, `○` pending, `✔` struck through
   (same content/activeForm schema as Claude Code's TodoWrite)
+- **sub-agents** — the `task` tool spawns a fresh-context worker that shares
+  your tools, permissions and undo stack; `explore` type is read-only. No
+  recursion, no context bleed.
 - **live spinner** — random verb (`Reticulating… 4s · 212 tok  esc to interrupt`)
   over streaming markdown
 - **● tool / ⎿ result** lines, colored by outcome
@@ -121,6 +124,43 @@ blocks. `Ctrl+C` twice to exit; one press warns first.
 
 **Plan mode is enforced, not decorative** — in `⏸ plan`, every mutating tool
 (write/edit/bash) is denied at dispatch with instructions to leave the mode.
+
+## Hooks, rules, styles — Claude-compatible config
+
+Drop-in compatible with Claude Code's `settings.json` shapes, in
+`~/.goatcode/config.json` or `goatcode.json`:
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(git add:*)", "Edit(src/**)", "WebFetch(domain:docs.rs)"],
+    "deny":  ["Bash(git push*)", "Read(~/.ssh/**)"]
+  },
+  "hooks": {
+    "PreToolUse":  [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "my-guard" }] }],
+    "PostToolUse": [{ "hooks": [{ "command": "formatter --fix $file" }] }],
+    "Stop":        [{ "hooks": [{ "command": "check-tests-pass" }] }]
+  },
+  "status_line": { "command": "my-statusline.sh" },
+  "output_style": "Explanatory",
+  "small_model": "groq/llama-3.3-70b"
+}
+```
+
+- **Permission rules** — deny > allow > prompt; `:*` prefixes, globs,
+  `domain:` for webfetch; compound commands can't sneak past prefix-allow
+  (same anti-bypass rule Claude uses).
+- **Hooks** — JSON on stdin, exit 2 blocks with stderr as the reason,
+  `permissionDecision`/`updatedInput` on stdout; a blocking Stop hook feeds
+  its reason back to the model as "keep going" feedback (capped at 4).
+- **Statusline** — your command receives the session JSON on stdin; its
+  output lines replace the footer.
+- **Output styles** — `~/.goatcode/output-styles/<name>.md` changes how the
+  agent talks; built-in `Explanatory` teaches as it works.
+- **WebFetch tool** — the model can read docs URLs itself (SSRF-guarded:
+  loopback/private/metadata hosts refused).
+- **@dir** — `@src/` injects a one-level file listing; `@file#L10-20` style
+  refs and images work too.
 
 **Checkpoints** — each write/edit captures the before/after content, so
 `/undo` rewinds the whole last turn, including files the agent created
