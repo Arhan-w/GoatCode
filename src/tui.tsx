@@ -26,6 +26,7 @@ import { loadMcpFromConfig, type McpClient } from "./mcp/client.ts";
 import { ToolKit, IMAGE_TYPES, MAX_IMAGE_BYTES, sniffImage } from "./tools.ts";
 import { clipboardImage } from "./computer.ts";
 import { runStatusLine, statusInput } from "./statusline.ts";
+import { cachedUpdateHint, refreshUpdateHint } from "./update.ts";
 import { log } from "./logger.ts";
 import { contentChars, estimateTokens } from "./llm.ts";
 import type { ContentPart } from "./llm.ts";
@@ -66,57 +67,13 @@ function shortPath(p: string): string {
   return home && p.startsWith(home) ? "~" + p.slice(home.length) : p;
 }
 
-/** Replace @path tokens with fenced file contents (sandboxed to cwd). */
-export function expandFileRefs(text: string, cwd: string, push?: (n: ReactNode) => void): string {
-  return text.replace(/(^|\s)@([^\s@]+)/g, (_all, pre: string, ref: string) => {
-    if (/\.(png|jpe?g|gif|webp)$/i.test(ref)) return `${pre}@${ref}`; // handled by buildUserContent
-    try {
-      const abs = resolvePath(cwd, ref);
-      const rel = relative(cwd, abs);
-      if (rel === "" || rel.startsWith("..")) return `${pre}@${ref}`; // outside root — leave as-is
-      if (!existsSync(abs)) { push?.(<Text color={RED}>  ⚠ @{ref} not found</Text>); return `${pre}@${ref}`; }
-      if (statSync(abs).isDirectory()) {
-        // @dir → one-level entry listing (Claude-compatible)
-        const names = readdirSync(abs).slice(0, 1000);
-        const more = readdirSync(abs).length > 1000 ? `\n… and ${readdirSync(abs).length - 1000} more entries` : "";
-        return `${pre}\n\n[dir: ${ref}]\n${names.join("\n")}${more}\n`;
-      }
-      const body = readFileSync(abs, "utf8").slice(0, 32_000);
-      return `${pre}\n\n[file: ${ref}]\n\`\`\`\n${body}\n\`\`\`\n`;
-    } catch {
-      return `${pre}@${ref}`;
-    }
-  });
-}
-
 /**
- * Build the user message: text @refs inline (fenced), image @refs become
- * base64 content parts with an [image: path] marker left in the text.
- * Returns a plain string when nothing image-shaped matched.
+ * @file/@dir/@image expansion lives in refs.ts (shared with `goat web`).
+ * These wrappers keep the TUI signature (push renders React nodes).
  */
-export function buildUserContent(text: string, cwd: string, push?: (n: ReactNode) => void): string | ContentPart[] {
-  const images: ContentPart[] = [];
-  const replaced = text.replace(/(^|\s)@([^\s@]+\.(?:png|jpe?g|gif|webp))/gi, (_all, pre: string, ref: string) => {
-    try {
-      const abs = resolvePath(cwd, ref);
-      const rel = relative(cwd, abs);
-      if (rel === "" || rel.startsWith("..")) return `${pre}@${ref}`; // outside sandbox — leave
-      if (!existsSync(abs)) { push?.(<Text color={RED}>  ⚠ @{ref} not found</Text>); return `${pre}@${ref}`; }
-      const size = statSync(abs).size;
-      if (size > MAX_IMAGE_BYTES) { push?.(<Text color={RED}>  ⚠ @{ref} too large ({size} bytes)</Text>); return `${pre}@${ref}`; }
-      const buf = readFileSync(abs);
-      const mediaType = sniffImage(buf); // extension is a hint; magic bytes decide
-      if (!mediaType) { push?.(<Text color={RED}>  ⚠ @{ref} isn't a real png/jpeg/gif/webp file</Text>); return `${pre}@${ref}`; }
-      images.push({ type: "image", data: buf.toString("base64"), mediaType });
-      return `${pre}[image: ${ref}]`;
-    } catch {
-      return `${pre}@${ref}`;
-    }
-  });
-  const expanded = expandFileRefs(replaced, cwd, push);
-  if (!images.length) return expanded;
-  return [{ type: "text", text: expanded }, ...images];
-}
+import { expandFileRefs as _ef, buildUserContent as _bu } from "./refs.ts";
+export const expandFileRefs = _ef;
+export const buildUserContent = _bu;
 
 type Mode = "default" | "acceptEdits" | "plan" | "bypass";
 const MODE_LABEL: Record<Mode, string> = {
@@ -246,6 +203,10 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       // native wins on name collision; plugins extend the palette
       const names = new Set(native.map((s) => s.name));
       setSkills([...native, ...fromPlugins.filter((s) => !names.has(s.name))]);
+      // update hint: cached check (max 1 API call / 6h), never blocks boot
+      const hint = cachedUpdateHint();
+      if (hint) push(<Text dimColor color={DIM}>  ↑ GoatCode {hint.latest} available — run: goat self-update</Text>);
+      else refreshUpdateHint();
     })();
   }, [push]);
 
@@ -449,7 +410,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
 
     // @file references — text refs inline as fenced content; image refs attach
     // base64 parts the model can see (anthropic/openai/gemini/responses)
-    let expanded = buildUserContent(text, sessionRef.current.cwd, push);
+    let expanded = buildUserContent(text, sessionRef.current.cwd, (m) => push(<Text color={RED}>  ⚠ {m}</Text>));
     // ctrl+V image: attach as a base64 part (and give a bare paste a prompt)
     if (pasted) {
       try {

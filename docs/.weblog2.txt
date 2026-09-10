@@ -1,0 +1,7 @@
+Secure MCP Filesystem Server running on stdio
+Client does not support MCP Roots, using allowed directories set from server args: [ 'C:\\Users\\Arhan\\AppData\\Local\\Temp\\goat-e2e' ]
+
+  GoatCode web ui  →  http://localhost:4899/?token=6a794199d68225cac32f2bd1
+  (localhost-only; this URL is the key — close the tab + quit to revoke)
+
+[Bun.serve]: request timed out after 10 seconds. Pass `idleTimeout` to configure.

@@ -7,6 +7,7 @@
  */
 import { spawn } from "node:child_process";
 import type { Session } from "./session.ts";
+import { VERSION } from "./constants.ts";
 
 export interface StatusLineInput {
   session_id: string;
@@ -31,7 +32,7 @@ export function statusInput(
     cwd: session.cwd,
     model: { id: modelId, display_name: modelId },
     workspace: { current_dir: session.cwd, project_dir: session.cwd },
-    version: "2.1.3",
+    version: VERSION,
     output_style: { name: style ?? "default" },
     cost: { total_tokens_in: session.usage.in, total_tokens_out: session.usage.out },
     context_window: {

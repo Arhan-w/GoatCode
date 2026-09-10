@@ -1294,3 +1294,63 @@ describe("computer rules", () => {
     rmSync(root, { recursive: true, force: true });
   });
 });
+
+// ---------- update checks ----------
+describe("update", () => {
+  test("versionLess compares semver numerically, not lexically", async () => {
+    const { versionLess } = await import("../src/update.ts");
+    expect(versionLess("2.1.9", "2.1.10")).toBe(true);   // the classic string bug
+    expect(versionLess("2.9.0", "2.10.0")).toBe(true);
+    expect(versionLess("v2.1.3", "2.2.0")).toBe(true);
+    expect(versionLess("2.2.0", "2.2.0")).toBe(false);
+    expect(versionLess("2.2.1", "2.2.0")).toBe(false);
+    expect(versionLess("2.1.3-beta", "2.1.3")).toBe(false); // prerelease ignored
+  });
+
+  test("assetName maps platform/arch to release assets", async () => {
+    const { assetName } = await import("../src/update.ts");
+    expect(assetName("win32", "x64")).toBe("goat-windows-x64.exe");
+    expect(assetName("darwin", "arm64")).toBe("goat-darwin-arm64");
+    expect(assetName("linux", "x64")).toBe("goat-linux-x64");
+    expect(assetName("freebsd", "x64")).toBeNull();
+  });
+
+  test("VERSION is the single source of truth (constants == both package.json)", async () => {
+    const { VERSION } = await import("../src/constants.ts");
+    const root = await Bun.file("package.json").json();
+    const npm = await Bun.file("npm-package/package.json").json();
+    expect(root.version).toBe(VERSION);
+    expect(npm.version).toBe(VERSION);
+    const idx = await Bun.file("src/index.ts").text();
+    expect(idx).toContain("`goatcode ${VERSION}`"); // no hardcoded version strings
+  });
+
+  test("cachedUpdateHint only fires for a genuinely newer release", async () => {
+    const { cachedUpdateHint } = await import("../src/update.ts");
+    const { VERSION } = await import("../src/constants.ts");
+    const fs = await import("node:fs");
+    const { join } = await import("node:path");
+    const hintPath = join(home, "update-check.json");
+    // newer than current -> hint
+    fs.writeFileSync(hintPath, JSON.stringify({ latest: "99.0.0", checkedAt: Date.now() }));
+    expect(cachedUpdateHint(VERSION)?.latest).toBe("99.0.0");
+    // same/older -> no hint
+    fs.writeFileSync(hintPath, JSON.stringify({ latest: VERSION, checkedAt: Date.now() }));
+    expect(cachedUpdateHint(VERSION)).toBeUndefined();
+    // corrupt -> no hint, no throw
+    fs.writeFileSync(hintPath, "not json");
+    expect(cachedUpdateHint(VERSION)).toBeUndefined();
+  });
+
+  test("refreshUpdateHint respects the offline opt-out", async () => {
+    const { refreshUpdateHint } = await import("../src/update.ts");
+    const fs = await import("node:fs");
+    const { join } = await import("node:path");
+    process.env.GOAT_NO_UPDATE_CHECK = "1";
+    fs.rmSync(join(home, "update-check.json"), { force: true });
+    refreshUpdateHint();               // must not write anything
+    await Bun.sleep(50);
+    expect(fs.existsSync(join(home, "update-check.json"))).toBe(false);
+    delete process.env.GOAT_NO_UPDATE_CHECK;
+  });
+});

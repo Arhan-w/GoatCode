@@ -13,7 +13,8 @@
  *   goat -c | --continue          resume the most recent session
  *   goat mcp add <name> <cmd>     add an MCP server
  */
-import { run, expandFileRefs, buildUserContent } from "./tui.tsx";
+import { run } from "./tui.tsx";
+import { buildUserContent } from "./refs.ts";
 import { appDir, loadConfig, saveConfig, splitModel, type CustomEndpoint } from "./config.ts";
 import { CredentialStore, OAUTH_PROVIDERS, ProviderRegistry, type Credential } from "./providers.ts";
 import { listSessions } from "./session.ts";
@@ -27,18 +28,11 @@ import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import { buildExtraSystem, loadOutputStyle } from "./context.ts";
 import { join } from "node:path";
 import type { GoatConfig } from "./config.ts";
+import { VERSION } from "./constants.ts";
+import { selfUpdate, checkForUpdate, refreshUpdateHint } from "./update.ts";
 
-/** Native skills (user/project/claude dirs) extended by anything plugins provide. */
-export function allSkills(cfg: GoatConfig) {
-  const native = loadSkills(
-    join(appDir(), "skills"),
-    join(process.cwd(), "skills"),
-    join(process.cwd(), ".claude", "skills"),
-  );
-  const fromPlugins = pluginSkills(loadPlugins(cfg.pluginDirs.map((d) => join(process.cwd(), d))));
-  const names = new Set(native.map((s) => s.name));
-  return [...native, ...fromPlugins.filter((s) => !names.has(s.name))];
-}
+import { allSkills } from "./index-shared.ts";
+export { allSkills };
 
 const io: LoginIO = {
   print: (s) => console.log(s),
@@ -60,12 +54,33 @@ async function main(): Promise<number> {
   };
   const has = (name: string): boolean => argv.includes(name);
 
-  if (has("--version") || has("-V")) { console.log("goatcode 2.1.3"); return 0; }
+  if (has("--version") || has("-V")) { console.log(`goatcode ${VERSION}`); return 0; }
   const m = flag("-m") ?? flag("--model");
   if (m) { cfg.model = m; splitModel(cfg); }
   if (has("--auto")) cfg.autoApprove = true;
 
   const sub = argv[0];
+
+  // goat web [--port N] [--no-open] — the agent with a browser UI (localhost only)
+  if (sub === "web") {
+    const { runWeb } = await import("./web.ts");
+    await runWeb({ port: flag("--port") ? Number(flag("--port")) : undefined, open: !has("--no-open") });
+    return 0;
+  }
+
+  // goat self-update [--check] — swap the running binary for the latest release
+  if (sub === "self-update" || sub === "update") {
+    if (has("--check")) {
+      const rel = await checkForUpdate();
+      if (rel) console.log(`update available: ${VERSION} -> ${rel.version}\n  ${rel.url}\n  run: goat self-update`);
+      else console.log(`goatcode ${VERSION} is the latest release.`);
+      return 0;
+    }
+    console.log(`goatcode ${VERSION} — checking for updates...`);
+    const r = await selfUpdate((s) => console.log(s));
+    console.log((r.ok ? "" : "error: ") + r.message);
+    return r.ok ? 0 : 1;
+  }
 
   if (sub === "auth") {
     const pid = argv[1];
@@ -278,7 +293,10 @@ async function main(): Promise<number> {
   return 0;
 }
 
-main().then((code) => process.exit(code)).catch((e) => {
-  console.error(e?.message ?? e);
-  process.exit(1);
-});
+// only run when executed directly — web.ts imports helpers from here
+if (import.meta.main) {
+  main().then((code) => process.exit(code)).catch((e) => {
+    console.error(e?.message ?? e);
+    process.exit(1);
+  });
+}
