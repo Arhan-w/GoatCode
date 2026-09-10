@@ -32,6 +32,7 @@ BUN = os.environ.get("GOAT_BUN", str(Path.home() / ".bun" / "bin" / "bun.exe"))
 
 ROWS, COLS = 34, 96
 
+DEMO = os.environ.get("GOAT_DEMO", "read")
 DEMO_QUESTION = "what does @t.txt say?"
 
 
@@ -65,7 +66,7 @@ def main() -> None:
     (goat_home / "sessions").mkdir(parents=True)
     # The banner shows a real model id; the "anthropic" endpoint is secretly
     # the local deterministic mock so every capture run is identical.
-    (goat_home / "config.json").write_text(json.dumps({
+    cfg_obj = {
         "model": "anthropic/claude-sonnet-4-5",
         "max_tokens": 512,
         "endpoints": {
@@ -76,16 +77,29 @@ def main() -> None:
                 "models": ["claude-sonnet-4-5"],
             },
         },
-    }, indent=2), encoding="utf-8")
+    }
+    if DEMO == "failover":
+        # primary always 429s; the fallback answers on PORT+1
+        cfg_obj["endpoints"]["fallback"] = {
+            "base_url": f"http://127.0.0.1:{PORT + 1}/v1",
+            "format": "openai",
+            "api_key": "demo-key",
+            "models": ["claude-sonnet-4-5"],
+        }
+        cfg_obj["fallback_models"] = ["fallback/claude-sonnet-4-5"]
+    (goat_home / "config.json").write_text(json.dumps(cfg_obj, indent=2), encoding="utf-8")
 
     # --- demo project ---
     proj = ROOT / "docs" / ".goatdemo-proj"
-    if proj.exists():
-        shutil.rmtree(proj, ignore_errors=True)
-    proj.mkdir(parents=True)
+    shutil.rmtree(proj, ignore_errors=True)
+    proj.mkdir(parents=True, exist_ok=True)  # an orphaned winpty-agent may hold it as CWD
     (proj / "t.txt").write_text("hello from the goat pen\n", encoding="utf-8")
 
-    # --- mock server ---
+    # --- mock server(s) ---
+    # failover scenario: primary "anthropic" is a dead provider (always 429),
+    # fallback "fallback" is the normal scripted mock on PORT+1.
+    failover = DEMO == "failover"
+    extra_mock = None
     mock = None
     try:
         import urllib.request
@@ -93,7 +107,14 @@ def main() -> None:
     except Exception:
         mock = subprocess.Popen(
             [sys.executable, str(ROOT / "docs" / "mock_server.py"), "--port", str(PORT)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env={**os.environ, "GOAT_DEMO": "dead" if failover else DEMO})
+        time.sleep(1.2)
+    if failover:
+        extra_mock = subprocess.Popen(
+            [sys.executable, str(ROOT / "docs" / "mock_server.py"), "--port", str(PORT + 1)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env={**os.environ, "GOAT_DEMO": "read"})
         time.sleep(1.2)
 
     OUTDIR.mkdir(parents=True, exist_ok=True)

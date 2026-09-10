@@ -113,6 +113,10 @@ goat config set fallback-models '["openrouter/claude-sonnet","groq/llama-3.3-70b
 
 When your primary provider hard-fails (quota exhausted, expired auth, outage), GoatCode walks the fallback list mid-turn, prints `⇢ switched provider`, and keeps going on the next one it can reach — no session restart, no lost context. The switch is sticky and saved, so the next launch starts on the provider that worked.
 
+<p align="center">
+  <img src="docs/assets/demo-failover.gif" alt="Live provider failover: 429 retries, switch, answer" width="720" />
+</p>
+
 ## Contributing
 
 1. Clone: `git clone https://github.com/Arhan-w/GoatCode.git`

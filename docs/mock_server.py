@@ -22,6 +22,24 @@ PORT = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 
 # streaming answer. Same deterministic timing everywhere.
 DEMO = os.environ.get("GOAT_DEMO", "read")
 
+if DEMO == "dead":
+    # failover demo: a provider that is always at capacity (retry-after: 1s so
+    # the client burns its retries quickly, then walks the fallback chain)
+    class DeadHandler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"data":[]}\n')
+        def do_POST(self):
+            self.send_response(429)
+            self.send_header("retry-after", "1")
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error":{"message":"quota exhausted - provider dead"}}\n')
+
 if DEMO == "todo":
     INTRO = "Three steps, tracked."
     TOOL_NAME, TOOL_ARGS = "todo", {"todos": [
@@ -108,5 +126,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"mock openai on http://127.0.0.1:{PORT}/v1", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    handler = DeadHandler if DEMO == "dead" else Handler
+    print(f"mock openai ({DEMO}) on http://127.0.0.1:{PORT}/v1", flush=True)
+    ThreadingHTTPServer(("127.0.0.1", PORT), handler).serve_forever()
