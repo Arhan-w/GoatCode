@@ -61,13 +61,6 @@ async function main(): Promise<number> {
 
   const sub = argv[0];
 
-  // goat web [--port N] [--no-open] — the agent with a browser UI (localhost only)
-  if (sub === "web") {
-    const { runWeb } = await import("./web.ts");
-    await runWeb({ port: flag("--port") ? Number(flag("--port")) : undefined, open: !has("--no-open") });
-    return 0;
-  }
-
   // goat self-update [--check] — swap the running binary for the latest release
   if (sub === "self-update" || sub === "update") {
     if (has("--check")) {

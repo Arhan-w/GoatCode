@@ -430,20 +430,6 @@ export class ToolKit {
     });
   }
 
-  async tool_checkUpdate(): Promise<ToolResult> {
-    if (!await this.ask("Check for updates?")) return { ok: false, output: "Update check canceled" };
-    try {
-      const latest = await fetch("https://api.github.com/repos/Arhan-w/GoatCode/releases/latest")
-        .then(r => r.json());
-      return {
-        ok: true,
-        output: `Current: v${process.env.npm_package_version}\nLatest: ${latest.tag_name}`
-      };
-    } catch (e) {
-      return { ok: false, output: "Update check failed" };
-    }
-  }
-
   async tool_webfetch(args: Record<string, any>): Promise<ToolResult> {
     const raw = String(args.url ?? "");
     let url: URL;
@@ -749,12 +735,6 @@ function builtinSpecs(): ToolSpec[] {
         pid: { type: "integer", description: "Target process id (from the windows action) — required for type on Windows via driver; clicks route to the window under the point" },
         window_title: { type: "string", description: "Alternative to pid: case-insensitive substring of the window title to target (type/key)" },
       }, required: ["action"] } },
-    {
-      name: "check-update",
-      description: "Check for new GoatCode updates",
-      parameters: {},
-      required: []
-    },
     { name: "todo", description:
       "Create and manage a structured task list for the current work. Use proactively for multi-step tasks (3+ steps); update statuses in real time — mark a task in_progress BEFORE starting it and completed IMMEDIATELY after, exactly one in_progress at a time. Skip it for single trivial tasks. Do not batch completions. The list is shown live to the user.",
       parameters: { type: "object", properties: {
