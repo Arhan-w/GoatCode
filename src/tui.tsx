@@ -90,6 +90,33 @@ interface PermRequest {
   resolve: (ok: boolean) => void;
 }
 
+/** Visible terminal width in cells (CJK double-width counted as 2). */
+function textWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) w += /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6]/.test(ch) ? 2 : 1;
+  return w;
+}
+const cols = () => Math.max(40, process.stdout.columns ?? 96);
+/**
+ * Rows the streaming region may occupy. The rest of the live frame is fixed:
+ * spinner+thinkline (2), tool/plan context (a few), input box (3), status (2),
+ * margins (2) — plus a permission dialog (~7) that can appear while a turn
+ * runs. Overshooting stdout.rows makes the terminal scroll, which breaks Ink's
+ * erase-and-repaint and ghosts the borders. 15 is the honest reservation.
+ */
+const liveBudget = () => Math.max(2, (process.stdout.rows ?? 24) - 15);
+/** Keep the trailing lines of `text` that fit in `budget` wrapped rows of `width`. */
+function tailWithin(text: string, budget: number, width: number): string {
+  const lines = text.split("\n");
+  let rows = 0, start = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    rows += Math.max(1, Math.ceil(textWidth(lines[i]) / (width - 2)));
+    if (rows > budget) break;
+    start = i;
+  }
+  return lines.slice(start).join("\n");
+}
+
 /** Renders the TUI and RESOLVES ONLY WHEN THE APP EXITS. Callers must await. */
 export async function run(cfg: GoatConfig = loadConfig(), resume?: string): Promise<void> {
   // Claude-style boot: wipe screen + scrollback first so the session owns a
@@ -289,10 +316,22 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       for await (const ev of agent.runTurn(text, ctrl.signal)) {
         if (ctrl.signal.aborted) break;
         switch (ev.kind) {
-          case "text":
+          case "text": {
             acc += ev.text;
+            // The live frame must never exceed the viewport: scrolling breaks
+            // Ink's clear/redraw and ghosts the input box (duplicate borders).
+            // Anything past the budget scrolls into history (Static) as settled
+            // lines — same as Claude Code streaming into scrollback.
+            const budget = liveBudget();
+            const kept = tailWithin(acc, budget, cols());
+            if (kept !== acc) {
+              const done = acc.slice(0, acc.length - kept.length).trimEnd();
+              if (done.trim()) push(<MdText text={done} />);
+              acc = kept;
+            }
             setStream(acc);
             break;
+          }
           case "thinking":
             thinkAcc += ev.text;
             setThinkLine(thinkAcc.split("\n").slice(-1)[0].slice(0, 120));
@@ -726,7 +765,7 @@ function PlanPanel({ todos }: { todos: Todo[] }) {
   return (
     <Box flexDirection="column" paddingLeft={1} marginBottom={0}>
       <Text dimColor color={DIM}>  Plan {done}/{todos.length}</Text>
-      {todos.slice(-8).map((t, i) => (
+      {todos.slice(-4).map((t, i) => (
         <Text key={`${t.content}-${i}`}>
           <Text color={t.status === "completed" ? GREEN : t.status === "in_progress" ? ACCENT : DIM}>
             {"  "}{t.status === "completed" ? "✔" : t.status === "in_progress" ? "▸" : "○"}{" "}

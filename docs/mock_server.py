@@ -49,6 +49,15 @@ if DEMO == "todo":
     ]}
     ANSWER = ("Tracked live: scan done, grouping running now, triage queued. "
               "The list updates in the panel above as each step flips — no polling needed.")
+elif DEMO == "long":
+    # viewport stress: intro + answer stream dozens of lines — the live frame
+    # exceeds short terminals and exposes render corruption (regression repro)
+    INTRO = ("Before I touch anything I want to be certain about the blast radius, "
+             "so let me walk the call graph top-down: entry, router, handlers, "
+             "persistence, and every boundary in between, one line at a time.")
+    TOOL_NAME, TOOL_ARGS = "read", {"path": "t.txt"}
+    ANSWER = ("Here is the full analysis, line by line. " +
+              " ".join(f"Observation {i} on module {i%7}: the boundary contracts here are respected and the failure modes degrade gracefully." for i in range(1, 26)))
 elif DEMO == "write":
     INTRO = "I'll create a new file with that content."
     TOOL_NAME, TOOL_ARGS = "write", {"path": "notes.txt", "content": "hello from the goat pen\\n"}
