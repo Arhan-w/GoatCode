@@ -124,6 +124,33 @@ export function listSessions(): { id: string; model: string; title: string }[] {
   return out.sort((a, b) => b.id.localeCompare(a.id));
 }
 
+export interface SessionSummary {
+  id: string;
+  model: string;
+  title: string;
+  cwd: string;
+  createdAt: number;   // unix seconds
+  usage: { in: number; out: number };
+}
+
+/** Every stored session's meta line — feeds the cost dashboard. */
+export function allSessions(): SessionSummary[] {
+  const dir = sessionsDir();
+  const out: SessionSummary[] = [];
+  for (const f of readdirSync(dir).filter((f) => f.endsWith(".jsonl"))) {
+    try {
+      const first = readFileSync(join(dir, f), "utf8").split("\n", 1)[0];
+      const meta = JSON.parse(first);
+      if (meta.meta) out.push({
+        id: meta.id, model: meta.model ?? "", title: meta.title ?? "",
+        cwd: meta.cwd ?? "", createdAt: meta.createdAt ?? 0,
+        usage: meta.usage ?? { in: 0, out: 0 },
+      });
+    } catch { /* skip corrupt */ }
+  }
+  return out.sort((a, b) => b.createdAt - a.createdAt);
+}
+
 /** Cheap deterministic digest used for compaction (no extra API call). */
 export function summarize(messages: Message[]): string {
   const parts: string[] = [];

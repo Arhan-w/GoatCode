@@ -17,7 +17,7 @@
  */
 import { run } from "./tui.tsx";
 import { buildUserContent } from "./refs.ts";
-import { appDir, loadConfig, saveConfig, splitModel, type CustomEndpoint } from "./config.ts";
+import { appDir, configPath, loadConfig, saveConfig, splitModel, type CustomEndpoint } from "./config.ts";
 import { CredentialStore, OAUTH_PROVIDERS, ProviderRegistry, type Credential } from "./providers.ts";
 import { listSessions } from "./session.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
@@ -29,6 +29,7 @@ import { Session } from "./session.ts";
 import { loadSkills } from "./skills/loader.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import { buildExtraSystem, loadOutputStyle } from "./context.ts";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GoatConfig } from "./config.ts";
 import { VERSION } from "./constants.ts";
@@ -45,6 +46,26 @@ const io: LoginIO = {
     return "";
   },
 };
+
+// raw config access for `goat config` — reads/writes the JSON file directly
+function loadConfigRaw(): Record<string, any> {
+  try { return JSON.parse(readFileSync(configPath(), "utf8")); } catch { return {}; }
+}
+function saveConfigRaw(data: Record<string, any>): void {
+  mkdirSync(appDir(), { recursive: true });
+  writeFileSync(configPath(), JSON.stringify(data, null, 2) + "\n", "utf8");
+}
+function snakeToCamel(k: string): string {
+  return k.replace(/[-_]([a-z])/g, (_, c) => c.toUpperCase());
+}
+function camelToSnake(k: string): string {
+  return k.replace(/[A-Z]/g, (c) => "_" + c.toLowerCase());
+}
+/** All spellings a key can appear under on disk / from the user. */
+function keyVariants(k: string): string[] {
+  const camel = snakeToCamel(k), snake = camelToSnake(k);
+  return [...new Set([k, camel, snake, k.replace(/_/g, "-")])];
+}
 
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
@@ -231,6 +252,49 @@ async function main(): Promise<number> {
     for (const row of listSessions())
       console.log(`  ${row.id}  ${row.model.padEnd(34)} ${row.title.slice(0, 60)}`);
     return 0;
+  }
+
+  // goat config [get <key> | set <key> <value> | unset <key> | path]
+  if (sub === "config") {
+    const action = argv[1];
+    if (!action || action === "list" || action === "path") {
+      if (action === "path") { console.log(configPath()); return 0; }
+      const data = { ...loadConfigRaw() };
+      for (const [k, v] of Object.entries(data))
+        console.log(`  ${k.padEnd(18)} ${JSON.stringify(v)}`);
+      return 0;
+    }
+    if (action === "get" || action === "set" || action === "unset") {
+      const key = argv[2];
+      if (!key) { console.log(`usage: goat config ${action} <key>${action === "set" ? " <value>" : ""}`); return 1; }
+      const data = { ...loadConfigRaw() };
+      if (action === "get") {
+        for (const v of keyVariants(key)) {
+          if (data[v] !== undefined) { console.log(JSON.stringify(data[v])); return 0; }
+        }
+        console.log(`${key}: not set`);
+        return 1;
+      }
+      if (action === "unset") {
+        for (const v of keyVariants(key)) delete data[v];
+        saveConfigRaw(data);
+        console.log(`unset ${key}`);
+        return 0;
+      }
+      const rawVal = argv[3];
+      if (rawVal === undefined) { console.log("missing value"); return 1; }
+      let val: unknown = rawVal;
+      if (rawVal === "true") val = true;
+      else if (rawVal === "false") val = false;
+      else if (rawVal !== "" && !isNaN(Number(rawVal))) val = Number(rawVal);
+      for (const v of keyVariants(key)) delete data[v];
+      data[snakeToCamel(key)] = val;
+      saveConfigRaw(data);
+      console.log(`${key} = ${JSON.stringify(val)}`);
+      return 0;
+    }
+    console.log("usage: goat config [list|path|get <k>|set <k> <v>|unset <k>]");
+    return 1;
   }
 
   if (sub === "resume") {

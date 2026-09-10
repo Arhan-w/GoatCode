@@ -9,7 +9,7 @@ import type { GoatConfig } from "./config.ts";
 import { appDir, configPath, saveConfig, splitModel } from "./config.ts";
 import type { ProviderRegistry } from "./providers.ts";
 import { CredentialStore, OAUTH_PROVIDERS, type Credential } from "./providers.ts";
-import { Session, listSessions } from "./session.ts";
+import { Session, listSessions, allSessions } from "./session.ts";
 import { costUsd, fmtUsd } from "./pricing.ts";
 import { contentChars, estimateTokens, textOf } from "./llm.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
@@ -334,7 +334,17 @@ export function runSlash(line: string, io: SlashIO): boolean {
     }
 
     case "/init": {
-      void io.runTurn("Create a GOAT.md file documenting this codebase for future GoatCode sessions: architecture, key files, commands, conventions.");
+      void io.runTurn(
+        "Analyze this codebase and create (or rewrite) a GOAT.md file at the project root — the memory file every future GoatCode session loads first.\n\n" +
+        "Method: read the build/config files (package.json, pyproject.toml, Cargo.toml, go.mod, Makefile, CI workflows) and the 5-10 most important source files before writing anything. Do not guess.\n\n" +
+        "GOAT.md must contain, in this order, terse and factual:\n" +
+        "1. one-paragraph project overview (what it is, who uses it)\n" +
+        "2. commands — exact invocations for: install, build, run, test (single test too), lint/typecheck\n" +
+        "3. architecture — directory layout as a tree with one-line notes, data flow for the core loop\n" +
+        "4. conventions actually observed in the code (naming, file layout, error style, comment density) — with one file:line example each\n" +
+        "5. gotchas — non-obvious constraints, env vars, flaky spots, anything that would burn a new session\n\n" +
+        "Keep it under ~150 lines. Bad GOAT.md is worse than none: every claim must be something you verified by reading a file.",
+      );
       return true;
     }
 
@@ -364,6 +374,44 @@ export function runSlash(line: string, io: SlashIO): boolean {
           <Text dimColor color="#8a8a8a">  avg {avgIn.toLocaleString()} in/turn · {io.session.messages.length} messages · ~{Math.round(chars / 4).toLocaleString()} tok in history · compacted: {io.session.compactedFrom > 0 ? `first ${io.session.compactedFrom} msgs folded` : "no"}</Text>
         </Box>,
       );
+      if (rest.join(" ").trim() === "all" || rest.join(" ").trim() === "-a") {
+        const all = allSessions();
+        const byModel = new Map<string, { in: number; out: number; cost: number; n: number }>();
+        const byDay = new Map<string, { in: number; out: number; cost: number; n: number }>();
+        let tin = 0, tout = 0, tcost = 0, unknownCost = false;
+        for (const s of all) {
+          const c = costUsd(s.model, s.usage.in, s.usage.out);
+          if (c == null) unknownCost = true;
+          for (const [key, bucket] of [
+            [s.model || "(none)", byModel],
+            [new Date(s.createdAt * 1000).toISOString().slice(0, 10), byDay],
+          ] as const) {
+            const b = bucket.get(key) ?? { in: 0, out: 0, cost: 0, n: 0 };
+            b.in += s.usage.in; b.out += s.usage.out; b.cost += c ?? 0; b.n++;
+            bucket.set(key, b);
+          }
+          tin += s.usage.in; tout += s.usage.out; tcost += c ?? 0;
+        }
+        io.push(
+          <Box flexDirection="column" marginTop={1}>
+            <Text>  <Text bold color="#a855f7">all time</Text> · {all.length} sessions · {tin.toLocaleString()} in / {tout.toLocaleString()} out tokens · <Text color="#4ade80">{fmtUsd(tcost)}</Text>{unknownCost ? <Text dimColor color="#8a8a8a"> (some models unpriced)</Text> : null}</Text>
+          </Box>,
+        );
+        const days = [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 7);
+        if (days.length) {
+          io.push(<Text dimColor color="#8a8a8a"> </Text>); io.push(<Text dimColor color="#8a8a8a">  days</Text>);
+          for (const [day, b] of days)
+            io.push(<Text>    {day}  {String(b.n).padStart(3)} sess  {b.in.toLocaleString().padStart(12)} in  {b.out.toLocaleString().padStart(10)} out  <Text color="#4ade80">{fmtUsd(b.cost)}</Text></Text>);
+        }
+        const models = [...byModel.entries()].sort((a, b) => (b[1].cost ?? 0) - (a[1].cost ?? 0)).slice(0, 6);
+        if (models.length) {
+          io.push(<Text dimColor color="#8a8a8a"> </Text>); io.push(<Text dimColor color="#8a8a8a">  models</Text>);
+          for (const [model, b] of models)
+            io.push(<Text>    {model.padEnd(34).slice(0, 34)}  {b.in.toLocaleString().padStart(12)} in  {b.out.toLocaleString().padStart(10)} out  <Text color="#4ade80">{fmtUsd(b.cost)}</Text></Text>);
+        }
+      } else {
+        io.push(<Text dimColor color="#8a8a8a">  /usage all — cost across every stored session</Text>);
+      }
       return true;
     }
 

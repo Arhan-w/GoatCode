@@ -281,6 +281,27 @@ describe("session", () => {
     const rows = listSessions();
     expect(rows.some((r) => r.id === s.id && r.title === "listed")).toBe(true);
   });
+
+  test("allSessions exposes usage for the cost dashboard", async () => {
+    const { Session, allSessions } = await import("../src/session.ts");
+    const s = Session.new(home, "anthropic/claude-sonnet-4-5");
+    s.title = "spicy";
+    s.usage = { in: 1200, out: 340 };
+    s.save();
+    const rows = allSessions();
+    const mine = rows.find((r) => r.id === s.id);
+    expect(mine).toBeDefined();
+    expect(mine!.title).toBe("spicy");
+    expect(mine!.model).toBe("anthropic/claude-sonnet-4-5");
+    expect(mine!.usage.in).toBe(1200);
+    expect(mine!.usage.out).toBe(340);
+    expect(mine!.createdAt).toBeGreaterThan(0);
+    // corrupt session files must be skipped, not crash the dashboard
+    const { writeFileSync: wf } = await import("node:fs");
+    const { join: j } = await import("node:path");
+    wf(j(home, "sessions", "garbage.jsonl"), "not json\n", "utf8");
+    expect(allSessions().length).toBe(rows.length);
+  });
 });
 
 // ---------- skills ----------
