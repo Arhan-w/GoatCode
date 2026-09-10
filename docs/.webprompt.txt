@@ -1,1 +1,0 @@
-what does package.json say about the name?
