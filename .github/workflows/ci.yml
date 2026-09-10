@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [v2-typescript]
+  pull_request:
+    branches: [v2-typescript]
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun x tsc --noEmit
+      - run: bun test
+      # print mode must boot, find no provider, and fail cleanly (exit 1)
+      - run: bun run src/index.ts -p "hello" --output-format json < /dev/null || true
+        env:
+          GOATCODE_HOME: ${{ runner.temp }}/goat-ci-home

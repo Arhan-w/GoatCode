@@ -3,6 +3,8 @@
  *
  *   goat                          interactive TUI
  *   goat -p "fix the tests"       one-shot prompt, prints result and exits
+ *   cat err.log | goat -p "why?"  piped stdin becomes context for the prompt
+ *   goat -p --output-format json  machine-readable result for scripts and CI
  *   goat auth <provider> --key K  store API key
  *   goat auth <provider> --oauth  browser/device OAuth login
  *   goat providers [--check]      list providers
@@ -20,6 +22,7 @@ import { CredentialStore, OAUTH_PROVIDERS, ProviderRegistry, type Credential } f
 import { listSessions } from "./session.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
 import { resolve, resolveSmall } from "./runtime.ts";
+import { costUsd } from "./pricing.ts";
 import { Agent } from "./agent.ts";
 import { ToolKit } from "./tools.ts";
 import { Session } from "./session.ts";
@@ -244,10 +247,24 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  // one-shot print mode
-  const prompt = flag("-p") ?? flag("--print");
-  if (prompt) {
-    const quiet = has("-q") ?? false;
+  // one-shot print mode — goat -p "fix the tests" [--output-format json] [-q]
+  // Accepts piped stdin too: `cat error.log | goat -p "why did this fail"`
+  // sends the log as context with the query; `goat -p -` reads the whole
+  // prompt from stdin. --output-format json prints one result object on
+  // stdout (everything else goes to stderr) for scripts and CI.
+  const prompt = flag("-p") ?? flag("--print") ?? ((argv[argv.length - 1] === "-p" || argv[argv.length - 1] === "--print") ? "" : undefined);
+  if (prompt !== undefined) {
+    const json = flag("--output-format") === "json";
+    const quiet = has("-q") || json;
+    let stdinText = "";
+    if (!process.stdin.isTTY) {
+      const chunks: string[] = [];
+      for await (const c of process.stdin) chunks.push(typeof c === "string" ? c : (c as Buffer).toString("utf8"));
+      stdinText = chunks.join("").trim();
+    }
+    const query = (prompt === "" || prompt === "-") ? stdinText
+      : stdinText ? `${stdinText}\n\n${prompt}` : prompt;
+    if (!query) { console.error("nothing to do: pass a prompt to -p or pipe text on stdin"); return 1; }
     const r = await resolve(cfg, registry);
     const session = Session.new(process.cwd(), cfg.model);
     const tools = new ToolKit(process.cwd(), { autoApprove: cfg.autoApprove, rules: cfg.permissions });
@@ -269,16 +286,33 @@ async function main(): Promise<number> {
         loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
     });
     let out = "";
-    const expandedPrompt = buildUserContent(prompt, process.cwd());
+    let failed = "";
+    const expandedPrompt = buildUserContent(query, process.cwd());
     for await (const ev of agent.runTurn(expandedPrompt)) {
       if (ev.kind === "text") { out += ev.text; if (!quiet) process.stdout.write(ev.text); }
       else if (ev.kind === "tool_start" && !quiet) process.stderr.write(`\n[tool ${ev.tool} ${JSON.stringify(ev.args).slice(0, 100)}]\n`);
       else if (ev.kind === "retry") process.stderr.write(`\n[retry attempt ${ev.attempt + 1} in ${(ev.waitMs / 1000).toFixed(1)}s: ${ev.reason}]\n`);
-      else if (ev.kind === "error") { process.stderr.write(`\nerror: ${ev.text}\n`); await mcp?.shutdown(); return 1; }
+      else if (ev.kind === "error") failed = ev.text;
     }
-    if (out && !quiet) process.stdout.write("\n");
     await mcp?.shutdown();
-    return 0;
+    session.save();
+    if (json) {
+      const cost = costUsd(cfg.model, session.usage.in, session.usage.out);
+      process.stdout.write(JSON.stringify({
+        type: "result",
+        subtype: failed ? "error" : "success",
+        is_error: !!failed,
+        ...(failed ? { error: failed } : { result: out }),
+        session_id: session.id,
+        model: cfg.model,
+        usage: { input_tokens: session.usage.in, output_tokens: session.usage.out },
+        ...(cost != null ? { cost_usd: +cost.toFixed(6) } : {}),
+      }) + "\n");
+    } else if (failed) {
+      process.stderr.write(`\nerror: ${failed}\n`);
+    }
+    if (out && !quiet && !failed) process.stdout.write("\n");
+    return failed ? 1 : 0;
   }
 
   // interactive TUI — await so the process lives until the app exits
