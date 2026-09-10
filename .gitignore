@@ -16,3 +16,4 @@ scripts/pty-vision.txt
 docs/assets/frames/
 npm-package/bin/goat.exe
 npm-package/*.tgz
+__pycache__/
