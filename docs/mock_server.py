@@ -45,7 +45,7 @@ else:  # read
 
 
 def sse(chunk: dict) -> bytes:
-    return f"data: {json.dumps(chunk)}\\n\\n".encode()
+    return f"data: {json.dumps(chunk)}\n\n".encode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -100,8 +100,9 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(sse({"choices": [{"delta": {"content": word + " "}}]}))
                     self.wfile.flush()
                     time.sleep(0.10)
-                self.wfile.write(sse({"choices": [{"delta": {}, "finish_reason": "stop"}],\n                                      "usage": {"prompt_tokens": 512, "completion_tokens": 42}}))
-            self.wfile.write(b"data: [DONE]\\n\\n")
+                self.wfile.write(sse({"choices": [{"delta": {}, "finish_reason": "stop"}],
+                                      "usage": {"prompt_tokens": 512, "completion_tokens": 42}}))
+            self.wfile.write(b"data: [DONE]\n\n")
         except (BrokenPipeError, ConnectionResetError):
             pass
 

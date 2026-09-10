@@ -29,6 +29,7 @@ export type AgentEvent =
   | { kind: "usage"; text: string; usage?: { prompt: number; completion: number } }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
   | { kind: "retry"; attempt: number; waitMs: number; reason: string }
+  | { kind: "fallback"; from: string; to: string; reason: string }
   | { kind: "todo"; todos: Todo[] }
   | { kind: "error"; text: string }
   | { kind: "done" };
@@ -56,6 +57,9 @@ export interface AgentDeps {
   requestTimeoutMs?: number;
   /** Tools hidden from the model AND refused at dispatch (subagent guardrails). */
   disallowedTools?: Set<string>;
+  /** Providers tried, in order, when the primary hard-fails before streaming
+   *  any content (quota exhausted, bad/expired auth, provider down). */
+  fallbacks?: Array<{ client: ChatClient; model: string }>;
 }
 
 export class Agent {
@@ -71,6 +75,7 @@ export class Agent {
   maxAttempts: number;
   requestTimeoutMs: number;
   disallowedTools: Set<string>;
+  fallbacks: Array<{ client: ChatClient; model: string }>;
 
   constructor(deps: AgentDeps) {
     this.client = deps.client;
@@ -85,6 +90,7 @@ export class Agent {
     this.maxAttempts = deps.maxAttempts ?? LLM_MAX_ATTEMPTS;
     this.requestTimeoutMs = deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
     this.disallowedTools = deps.disallowedTools ?? new Set();
+    this.fallbacks = deps.fallbacks ? [...deps.fallbacks] : [];
   }
 
   private messages(): Message[] {
@@ -119,6 +125,7 @@ export class Agent {
         else if (ev.kind === "thinking") yield ev;
         else if (ev.kind === "usage") yield ev;
         else if (ev.kind === "retry") yield ev;
+        else if (ev.kind === "fallback") yield ev;
         else if (ev.kind === "tool_calls") toolCalls.push(...ev.toolCalls);
       }
       if (!toolCalls.length) {
@@ -219,6 +226,43 @@ export class Agent {
         if (timedOut && !signal?.aborted) (e as any).status = 408;
         const retryable = isRetryableLLMError(e) && !sawContent && attempt < this.maxAttempts && !signal?.aborted;
         if (!retryable) {
+          // Primary is out of retries (or hit a hard error like quota/auth).
+          // Before killing the turn, walk the fallback chain — each entry gets
+          // one shot; the first that streams content wins and sticks for the
+          // rest of the session (this.client / session.model are swapped).
+          if (!sawContent && !signal?.aborted && this.fallbacks.length) {
+            const from = this.session.model;
+            const reason = String(e?.message ?? e).slice(0, 160);
+            let switched = false;
+            while (this.fallbacks.length) {
+              const fb = this.fallbacks.shift()!;
+              try {
+                for await (const ev of this.streamOnce(signal, undefined, fb.client, fb.model)) {
+                  if (ev.kind === "text" || ev.kind === "thinking" || ev.kind === "tool_calls") {
+                    if (!switched) {
+                      switched = true;
+                      this.client = fb.client;
+                      this.session.model = fb.model;
+                      yield { kind: "fallback", from, to: fb.model, reason };
+                    }
+                  }
+                  yield ev;
+                }
+                if (switched) return; // stream completed on the fallback
+              } catch (fe: any) {
+                if (switched) {
+                  // already streamed partial output here — re-falling-back would
+                  // duplicate it; surface the error instead (Claude semantics)
+                  yield { kind: "error", text: `${fe?.name ?? "Error"}: ${fe?.message ?? fe}` };
+                  return;
+                }
+                /* this fallback failed pre-content — try the next */
+              }
+            }
+            if (switched) return;
+            yield { kind: "error", text: `all providers failed — last error: ${reason}` };
+            return;
+          }
           yield { kind: "error", text: `${e?.name ?? "Error"}: ${e?.message ?? e}` };
           return;
         }
@@ -242,10 +286,11 @@ export class Agent {
     }
   }
 
-  private async *streamOnce(signal?: AbortSignal, specs?: ToolSpec[]): AsyncGenerator<AgentEvent> {
-    for await (const ev of this.client.streamChat(
+  private async *streamOnce(signal?: AbortSignal, specs?: ToolSpec[],
+    client?: ChatClient, model?: string): AsyncGenerator<AgentEvent> {
+    for await (const ev of (client ?? this.client).streamChat(
       this.messages(), specs ?? this.tools.specs(),
-      { model: modelId(this.session.model), maxTokens: this.maxTokens, temperature: this.temperature, signal },
+      { model: modelId(model ?? this.session.model), maxTokens: this.maxTokens, temperature: this.temperature, signal },
     )) {
       if (ev.textDelta) yield { kind: "text", text: ev.textDelta };
       else if (ev.thinkingDelta) yield { kind: "thinking", text: ev.thinkingDelta };

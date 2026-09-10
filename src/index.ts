@@ -9,6 +9,8 @@
  *   goat auth <provider> --oauth  browser/device OAuth login
  *   goat providers [--check]      list providers
  *   goat endpoint add <id> ...    register a custom endpoint
+ *   goat addp <id> --base-url ... shorthand: add a provider + key + models
+ *   goat config set fallback-models '["b/x","c/y"]'  provider failover chain
  *   goat models <provider>        list catalog models
  *   goat sessions                 list saved sessions
  *   goat resume <id>              resume a session in the TUI
@@ -17,11 +19,11 @@
  */
 import { run } from "./tui.tsx";
 import { buildUserContent } from "./refs.ts";
-import { appDir, configPath, loadConfig, saveConfig, splitModel, type CustomEndpoint } from "./config.ts";
-import { CredentialStore, OAUTH_PROVIDERS, ProviderRegistry, type Credential } from "./providers.ts";
+import { appDir, configPath, loadConfig, saveConfig, splitModel, type CustomEndpoint, type WireFormat } from "./config.ts";
+import { CredentialStore, OAUTH_PROVIDERS, ProviderRegistry, normalizeBaseUrl, type Credential } from "./providers.ts";
 import { listSessions } from "./session.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
-import { resolve, resolveSmall } from "./runtime.ts";
+import { resolve, resolveSmall, resolveFallbacks } from "./runtime.ts";
 import { costUsd } from "./pricing.ts";
 import { Agent } from "./agent.ts";
 import { ToolKit } from "./tools.ts";
@@ -97,6 +99,30 @@ async function main(): Promise<number> {
     const r = await selfUpdate((s) => console.log(s));
     console.log((r.ok ? "" : "error: ") + r.message);
     return r.ok ? 0 : 1;
+  }
+
+  // goat addp <id> --base-url URL [--format openai|claude|gemini|openai-responses] [--api-key KEY] [--api-key-env ENV] [--models m1,m2,...]
+  if (sub === "addp") {
+    const id = argv[1];
+    if (!id) { console.log("usage: goat addp <id> --base-url URL [--format openai|claude|gemini|openai-responses] [--api-key KEY] [--api-key-env ENV] [--models m1,m2,...]"); return 1; }
+    const baseUrl = flag("--base-url");
+    if (!baseUrl) { console.log("addp requires --base-url"); return 1; }
+    const format = (flag("--format") ?? "openai") as WireFormat;
+    const apiKey = flag("--api-key");
+    const apiKeyEnv = flag("--api-key-env");
+    const models = (flag("--models") ?? "").split(",").filter(Boolean);
+    if (!apiKey && !apiKeyEnv) { console.log("addp requires --api-key or --api-key-env"); return 1; }
+    cfg.endpoints[id] = {
+      id, baseUrl: normalizeBaseUrl(baseUrl),
+      format,
+      apiKey: apiKey ?? undefined,
+      apiKeyEnv: apiKeyEnv ?? undefined,
+      models,
+      label: flag("--label") ?? id,
+    };
+    saveConfig(cfg);
+    console.log(`added provider '${id}' (${format}) -> ${baseUrl}`);
+    return 0;
   }
 
   if (sub === "auth") {
@@ -286,6 +312,9 @@ async function main(): Promise<number> {
       let val: unknown = rawVal;
       if (rawVal === "true") val = true;
       else if (rawVal === "false") val = false;
+      else if (/^[[{"]/.test(rawVal)) {
+        try { val = JSON.parse(rawVal); } catch { console.log(`invalid JSON value: ${rawVal}`); return 1; }
+      }
       else if (rawVal !== "" && !isNaN(Number(rawVal))) val = Number(rawVal);
       for (const v of keyVariants(key)) delete data[v];
       data[snakeToCamel(key)] = val;
@@ -293,7 +322,7 @@ async function main(): Promise<number> {
       console.log(`${key} = ${JSON.stringify(val)}`);
       return 0;
     }
-    console.log("usage: goat config [list|path|get <k>|set <k> <v>|unset <k>]");
+    console.log("usage: goat config [list|path|get <k>|set <k> <v>|unset <k>]  (values: JSON parsed for arrays/objects)")
     return 1;
   }
 
@@ -344,6 +373,7 @@ async function main(): Promise<number> {
     }
     const agent = new Agent({
       client: r.client, smallClient: (await resolveSmall(cfg, registry)) ?? undefined,
+      fallbacks: await resolveFallbacks(cfg, registry),
       session, tools,
       maxTokens: cfg.maxTokens, temperature: cfg.temperature, maxSteps: cfg.maxSteps,
       extraSystem: [buildExtraSystem(allSkills(cfg), process.cwd()),
@@ -361,14 +391,15 @@ async function main(): Promise<number> {
     await mcp?.shutdown();
     session.save();
     if (json) {
-      const cost = costUsd(cfg.model, session.usage.in, session.usage.out);
+      // session.model tracks a mid-turn failover — report the model that answered
+      const cost = costUsd(session.model, session.usage.in, session.usage.out);
       process.stdout.write(JSON.stringify({
         type: "result",
         subtype: failed ? "error" : "success",
         is_error: !!failed,
         ...(failed ? { error: failed } : { result: out }),
         session_id: session.id,
-        model: cfg.model,
+        model: session.model,
         usage: { input_tokens: session.usage.in, output_tokens: session.usage.out },
         ...(cost != null ? { cost_usd: +cost.toFixed(6) } : {}),
       }) + "\n");

@@ -103,3 +103,25 @@ export async function resolveSmall(cfg: GoatConfig, registry: ProviderRegistry):
     return null;
   }
 }
+
+/**
+ * Build the failover chain from cfg.fallback_models: resolves each into a
+ * live client, skipping anything unusable (unknown provider, no creds, same
+ * as the primary). Failing to read the list never breaks the session.
+ */
+export async function resolveFallbacks(
+  cfg: GoatConfig, registry: ProviderRegistry, exceptModel?: string,
+): Promise<Array<{ client: ChatClient; model: string }>> {
+  const out: Array<{ client: ChatClient; model: string }> = [];
+  for (const m of cfg.fallbackModels ?? []) {
+    if (!m || m === cfg.model || m === exceptModel) continue;
+    try {
+      const alt = { ...cfg, model: m } as GoatConfig;
+      splitModel(alt);
+      if (alt.provider === cfg.provider) continue; // same endpoint, pointless
+      const r = await resolve(alt, registry);
+      out.push({ client: r.client, model: m });
+    } catch { /* no creds / unknown provider — skip silently, it's optional */ }
+  }
+  return out;
+}

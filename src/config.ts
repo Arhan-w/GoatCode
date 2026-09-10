@@ -60,6 +60,8 @@ export interface GoatConfig {
   smallModel?: string;
   /** Output style name or path to a .md file appended to the system prompt. */
   outputStyle?: string;
+  /** Models tried in order when the primary provider hard-fails (quota/auth/down). */
+  fallbackModels: string[];
   /** Server names that came from the project .mcp.json — never persisted to user config. */
   projectMcpNames: Set<string>;
 }
@@ -128,6 +130,9 @@ export function loadConfig(projectDir: string = process.cwd()): GoatConfig {
     statusLine: data.status_line?.command ? { command: String(data.status_line.command) } : undefined,
     smallModel: data.small_model ?? data.smallModel ? String(data.small_model ?? data.smallModel) : undefined,
     outputStyle: data.output_style ?? data.outputStyle ? String(data.output_style ?? data.outputStyle) : undefined,
+    fallbackModels: Array.isArray(data.fallback_models ?? data.fallbackModels)
+      ? (data.fallback_models ?? data.fallbackModels).map(String).filter((m: string) => m.includes("/"))
+      : [],
     projectMcpNames: new Set(),
   };
   for (const [pid, ed] of Object.entries<any>(data.endpoints ?? {})) {
@@ -200,6 +205,8 @@ export function saveConfig(cfg: GoatConfig): void {
   if (cfg.temperature != null) payload.temperature = cfg.temperature;
   if (cfg.smallModel) payload.small_model = cfg.smallModel;
   if (cfg.outputStyle) payload.output_style = cfg.outputStyle;
+  if (cfg.fallbackModels.length) payload.fallback_models = cfg.fallbackModels;
+  else delete payload.fallback_models;
   writeFileSync(configPath(), JSON.stringify(payload, null, 2), "utf8");
 }
 

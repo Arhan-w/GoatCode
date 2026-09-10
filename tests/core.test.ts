@@ -880,6 +880,74 @@ describe("retry", () => {
     expect(calls).toBe(1);
   });
 
+  test("primary hard-fails -> fallback provider answers and sticks", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const { LLMError } = await import("../src/llm.ts");
+    const primary = { async *streamChat() { throw new LLMError("HTTP 429: quota", { status: 429 }); } } as any;
+    const fb1 = { async *streamChat() { throw new LLMError("HTTP 401: key dead", { status: 401 }); } } as any;
+    const fb2 = { async *streamChat(_m: any, _t: any, opts: any) { yield { textDelta: `ok from ${opts.model}` }; } } as any;
+    const session = Session.new(home, "mock/m");
+    const agent = new Agent({
+      client: primary, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 2, retryBaseMs: 10, maxAttempts: 1,
+      fallbacks: [{ client: fb1, model: "dead/m1" }, { client: fb2, model: "good/m2" }],
+    });
+    const events: any[] = [];
+    let text = "";
+    for await (const ev of agent.runTurn("hi")) { events.push(ev.kind); if (ev.kind === "text") text += ev.text; }
+    expect(text).toBe("ok from m2");
+    expect(events).toContain("fallback");
+    expect(session.model).toBe("good/m2");           // sticky for this agent
+    expect(agent.session.model).toBe("good/m2");
+    // chain fully consumed on next construction inputs: agent.fallbacks is now empty
+    expect(agent.fallbacks).toHaveLength(0);
+  });
+
+  test("fallback chain empty -> original error surfaces unchanged", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const { LLMError } = await import("../src/llm.ts");
+    const primary = { async *streamChat() { throw new LLMError("HTTP 401: nope", { status: 401 }); } } as any;
+    const agent = new Agent({
+      client: primary, session: Session.new(home, "mock/m"),
+      tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 2, retryBaseMs: 10, maxAttempts: 1,
+    });
+    const kinds: string[] = [];
+    let err = "";
+    for await (const ev of agent.runTurn("hi")) { kinds.push(ev.kind); if (ev.kind === "error") err = (ev as any).text; }
+    expect(kinds).toContain("error");
+    expect(err).toContain("401");
+  });
+
+  test("resolveFallbacks skips primary, self, and dead providers", async () => {
+    const { resolveFallbacks } = await import("../src/runtime.ts");
+    const { loadConfig } = await import("../src/config.ts");
+    const { saveConfig } = await import("../src/config.ts");
+    const cfg = loadConfig(home);
+    cfg.model = "openai/gpt-4o";
+    cfg.fallbackModels = [
+      "openai/gpt-4o",          // same model as primary -> skip
+      "openai/o3",              // same provider as primary -> skip
+      "nope-lm/model",          // unknown provider -> skip
+      "deadlm/m",               // endpoint without creds -> skip
+      "livelm/answer",          // good -> included
+    ];
+    saveConfig(cfg);
+    // re-load so endpoints land in the config we hand to the resolver
+    const { loadConfig: lc2 } = await import("../src/config.ts");
+    const cfg2 = lc2(home);
+    const { ProviderRegistry } = await import("../src/providers.ts");
+    cfg2.endpoints.livelm = { id: "livelm", baseUrl: "http://127.0.0.1:1/v1", format: "openai", apiKey: "k", models: ["answer"], label: "livelm" };
+    cfg2.endpoints.deadlm = { id: "deadlm", baseUrl: "http://127.0.0.1:1/v1", format: "openai", models: [], label: "deadlm" }; // no key
+    const reg = new ProviderRegistry(cfg2.endpoints);
+    const list = await resolveFallbacks(cfg2, reg);
+    expect(list.map((f) => f.model)).toEqual(["livelm/answer"]);
+  });
+
   test("partial streamed text is not retried (avoids duplicate output)", async () => {
     const { Agent } = await import("../src/agent.ts");
     const { Session } = await import("../src/session.ts");

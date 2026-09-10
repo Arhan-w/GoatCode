@@ -94,7 +94,24 @@ goat -p "What's visible on screen?"
 
 ## Providers
 
-OpenAI, Anthropic, Google, Groq, Mistral, xAI, Together, Fireworks, DeepSeek, OpenRouter, Cloudflare, Voyage, LocalAI, Ollama, LM Studio, MLX, llama.cpp, and many more.
+OpenAI, Anthropic, Google, Groq, Mistral, xAI, Together, Fireworks, DeepSeek, OpenRouter, Cloudflare, Voyage, LocalAI, Ollama, LM Studio, MLX, llama.cpp, and many more — 183 in the built-in catalog.
+
+### Add any provider (OpenAI/Claude/Gemini-compatible)
+
+```bash
+goat addp myllm --base-url https://api.mypilot.example/v1 --api-key sk-... --format openai --models llama-4,qwq-32b
+goat -m myllm/llama-4 "hello"
+```
+
+Keys can live in an env var instead: `--api-key-env MY_PILLOT_KEY`.
+
+### Never stop coding — provider failover
+
+```bash
+goat config set fallback-models '["openrouter/claude-sonnet","groq/llama-3.3-70b"]'
+```
+
+When your primary provider hard-fails (quota exhausted, expired auth, outage), GoatCode walks the fallback list mid-turn, prints `⇢ switched provider`, and keeps going on the next one it can reach — no session restart, no lost context. The switch is sticky and saved, so the next launch starts on the provider that worked.
 
 ## Contributing
 

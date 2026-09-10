@@ -15,9 +15,9 @@ import { join, relative, resolve as resolvePath } from "node:path";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Agent, type AgentEvent } from "./agent.ts";
 import { COMMAND_DESC, SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
-import { appDir, loadConfig, saveConfig, type GoatConfig } from "./config.ts";
+import { appDir, loadConfig, saveConfig, splitModel, type GoatConfig } from "./config.ts";
 import { ProviderRegistry } from "./providers.ts";
-import { resolveSmall, ResolveError, resolve } from "./runtime.ts";
+import { resolveSmall, resolveFallbacks, ResolveError, resolve } from "./runtime.ts";
 import { Session } from "./session.ts";
 import { loadSkills, loadSkillBody, type SkillDef } from "./skills/loader.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
@@ -230,6 +230,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     try {
       const r = await resolve(cfgRef.current, registryRef.current);
       const smallClient = await resolveSmall(cfgRef.current, registryRef.current);
+      const fallbacks = await resolveFallbacks(cfgRef.current, registryRef.current, sessionRef.current.model);
       const m = modeRef.current;
       // one ToolKit per session so the undo stack + bg tasks survive turns
       if (!toolsRef.current || toolsRef.current.root !== sessionRef.current.cwd)
@@ -252,6 +253,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         session: sessionRef.current, tools,
         maxTokens: cfgRef.current.maxTokens, temperature: cfgRef.current.temperature,
         maxSteps: cfgRef.current.maxSteps,
+        fallbacks,
         extraSystem: [buildExtraSystem(skills, sessionRef.current.cwd),
           loadOutputStyle(cfgRef.current.outputStyle)].filter(Boolean).join("\n\n"),
       });
@@ -321,6 +323,23 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           }
           case "todo":
             setTodos(ev.todos);
+            break;
+          case "fallback":
+            flush();
+            // stick the switch for later turns AND across restarts
+            setCfg((c) => {
+              const n = { ...c, model: ev.to };
+              splitModel(n);
+              saveConfig(n);
+              return n;
+            });
+            push(
+              <Text>
+                <Text color="#fbbf24">⇢ switched provider</Text>
+                <Text dimColor color={DIM}>  {ev.from} → {ev.to} — {ev.reason}</Text>
+              </Text>,
+            );
+            log("agent", `fallback ${ev.from} -> ${ev.to}: ${ev.reason}`);
             break;
           case "retry":
             flush();
