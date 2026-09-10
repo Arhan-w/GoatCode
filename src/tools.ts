@@ -658,15 +658,6 @@ export class ToolKit {
 }
 
 function builtinSpecs(): ToolSpec[] {
-    return [
-      ...otherSpecs,
-      {
-        name: "check-update",
-        description: "Check for new GoatCode updates",
-        parameters: {},
-        required: []
-      }
-    ];
   return [
     { name: "read", description: "Read a file from the project. Text files return numbered lines; images (png/jpg/gif/webp) are shown to the model visually.",
       parameters: { type: "object", properties: {
