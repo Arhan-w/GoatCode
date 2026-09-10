@@ -6,7 +6,7 @@ export const WEBFETCH_TIMEOUT_MS = 30_000;
 export const SUBAGENT_MAX_STEPS = 25;
 /** Single source of truth for the version string — keep in lock-step with
  *  package.json (enforced by a test) and the git tag you cut. */
-export const VERSION = "2.1.4";
+export const VERSION = "2.1.5";
 export const REPO_SLUG = "Arhan-w/GoatCode";
 /** Default port for `goat web`. */
 export const WEB_DEFAULT_PORT = 4847;

@@ -8,7 +8,7 @@
  *   slash-command completion with descriptions
  *   Shift+Tab / Ctrl+O mode cycle · Ctrl+C interrupt · ↑↓ history
  */
-import { Box, Text, render, useApp, useInput } from "ink";
+import { Box, Static, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join, relative, resolve as resolvePath } from "node:path";
@@ -92,6 +92,9 @@ interface PermRequest {
 
 /** Renders the TUI and RESOLVES ONLY WHEN THE APP EXITS. Callers must await. */
 export async function run(cfg: GoatConfig = loadConfig(), resume?: string): Promise<void> {
+  // Claude-style boot: wipe screen + scrollback first so the session owns a
+  // clean viewport instead of trailing under shell history.
+  process.stdout.write("\x1b[2J\x1b[H\x1b[3J");
   const { waitUntilExit } = render(
     <App initialCfg={cfg} resume={resume} />,
     { stdin: process.stdin, stdout: process.stdout, exitOnCtrlC: false },
@@ -565,7 +568,12 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     // Shift+Tab arrives as an empty char with shift+tab flags (verified via
     // Ink's parse-keypress); older/odd terminals send ESC [ Z as raw text.
     if ((k.shift && k.tab) || ch === "\x1b[Z") { cycleMode(); return; }
-    if (k.ctrl && ch === "l") { setLines([]); setStream(""); return; } // clear scrollback, keep session
+    if (k.ctrl && ch === "l") {
+      // Static output is already on the terminal — wipe screen + scrollback
+      // then reset state so the live region repaints from a clean slate.
+      process.stdout.write("\x1b[2J\x1b[H\x1b[3J");
+      setLines([]); setStream(""); return;
+    }
     if (k.ctrl && ch === "r") {
       // reverse history search: cycle inserted prompt from history
       if (history.length) {
@@ -630,18 +638,13 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
 
   return (
     <Box flexDirection="column" width="100%">
-      <Box flexDirection="column">{lines}</Box>
+      <Static items={lines}>
+        {(item) => item}
+      </Static>
 
       {authBanner && (
         <Box flexDirection="column" borderStyle="round" borderColor="#facc15" paddingX={1} marginY={1}>
           <Text color="#facc15" bold>⚠  GoatCode is installed but not ready yet</Text>
-          <Text dimColor color={DIM}>{authBanner}</Text>
-          <Text dimColor color={DIM}>  then type a message and hit Enter, or run /auth to fix it now</Text>
-        </Box>
-      )}
-      {authBanner && (
-        <Box flexDirection="column" borderStyle="round" borderColor="#facc15" paddingX={1} marginY={1}>
-          <Text color="#facc15" bold>⚠ GoatCode is installed but not ready yet</Text>
           <Text dimColor color={DIM}>{authBanner}</Text>
           <Text dimColor color={DIM}>  then type a message and hit Enter, or run /auth to fix it now</Text>
         </Box>
