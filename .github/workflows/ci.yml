@@ -24,5 +24,6 @@ jobs:
       - run: bun test
       # print mode must boot, find no provider, and fail cleanly (exit 1)
       - run: bun run src/index.ts -p "hello" --output-format json < /dev/null || true
+        shell: bash
         env:
           GOATCODE_HOME: ${{ runner.temp }}/goat-ci-home
