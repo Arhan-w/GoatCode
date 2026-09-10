@@ -21,9 +21,7 @@
     "dev": "bun --watch src/index.ts",
     "test": "bun test",
     "build": "bun build src/index.ts --outdir dist --target bun",
-    "compile": "bun build src/index.ts --compile --outfile dist/goat",
-    "start:web": "bun src/web/server.ts",
-    "test:web": "bun test src/web/server.test.ts"
+    "compile": "bun build src/index.ts --compile --outfile dist/goat"
   },
   "private": true,
   "devDependencies": {
