@@ -4,10 +4,17 @@
   "description": "Every provider. One terminal. Agentic coding CLI with MCP, skills and plugins.",
   "module": "src/index.ts",
   "type": "module",
-  "bin": { "goat": "./src/index.ts" },
+  "bin": {
+    "goat": "./src/index.ts"
+  },
   "files": ["src", "README.md", "LICENSE"],
-  "engines": { "bun": ">=1.1" },
-  "repository": { "type": "git", "url": "git+https://github.com/Arhan-w/GoatCode.git" },
+  "engines": {
+    "bun": ">=1.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arhan-w/GoatCode.git"
+  },
   "keywords": ["cli", "ai", "coding-agent", "agent", "terminal", "mcp", "bun", "llm"],
   "scripts": {
     "start": "bun run src/index.ts",
@@ -24,6 +31,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@types/express": "^5.0.6",
+    "express": "^5.2.1",
     "ink": "^7.1.1",
     "ink-text-input": "^6.0.0",
     "marked": "^18.0.12",
