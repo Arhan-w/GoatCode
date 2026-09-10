@@ -17,3 +17,4 @@ docs/assets/frames/
 npm-package/bin/goat.exe
 npm-package/*.tgz
 __pycache__/
+docs/.omni-readme.md
