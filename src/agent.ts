@@ -79,6 +79,8 @@ export class Agent {
   disallowedTools: Set<string>;
   fallbacks: Array<{ client: ChatClient; model: string }>;
   cache: boolean;
+  /** Real prompt-token count of the most recent API call (true context size). */
+  lastPromptTokens = 0;
 
   constructor(deps: AgentDeps) {
     this.client = deps.client;
@@ -301,6 +303,9 @@ export class Agent {
       else if (ev.usage) {
         this.session.usage.in += ev.usage.prompt;
         this.session.usage.out += ev.usage.completion;
+        // true context size = everything the model saw this call (uncached +
+        // cached prompt tokens)
+        this.lastPromptTokens = ev.usage.prompt + (ev.usage.cacheRead ?? 0) + (ev.usage.cacheWrite ?? 0);
         if (ev.usage.cacheRead) this.session.usage.cacheRead = (this.session.usage.cacheRead ?? 0) + ev.usage.cacheRead;
         if (ev.usage.cacheWrite) this.session.usage.cacheWrite = (this.session.usage.cacheWrite ?? 0) + ev.usage.cacheWrite;
         yield { kind: "usage", text: `${ev.usage.prompt}+${ev.usage.completion} tok`, usage: ev.usage };

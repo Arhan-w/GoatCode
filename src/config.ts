@@ -61,6 +61,8 @@ export interface GoatConfig {
   /** Anthropic prompt caching: system+tools cached between turns (90% off on
    *  cache hits). Ignored by non-Anthropic wire formats. Default on. */
   cachePrompts: boolean;
+  /** Override the auto-detected context window (tokens) for the meter. */
+  contextWindow?: number;
   /** Output style name or path to a .md file appended to the system prompt. */
   outputStyle?: string;
   /** Models tried in order when the primary provider hard-fails (quota/auth/down). */
@@ -145,6 +147,8 @@ export function loadConfig(projectDir: string = process.cwd()): GoatConfig {
     autoApprove: Boolean(data.auto_approve ?? data.autoApprove ?? false),
     maxSteps: Number(data.max_steps ?? data.maxSteps ?? 40),
     cachePrompts: data.cache_prompts ?? data.cachePrompts ?? true,
+    contextWindow: data.context_window ?? data.contextWindow
+      ? Number(data.context_window ?? data.contextWindow) : undefined,
     endpoints: {},
     mcpServers: { ...(data.mcpServers ?? {}) },
     pluginDirs: Array.isArray(data.plugins) ? data.plugins : [],
@@ -211,6 +215,7 @@ export function saveConfig(cfg: GoatConfig): void {
     max_tokens: cfg.maxTokens,
     max_steps: cfg.maxSteps,
     cache_prompts: cfg.cachePrompts,
+    ...(cfg.contextWindow ? { context_window: cfg.contextWindow } : {}),
     auto_approve: cfg.autoApprove,
     endpoints: Object.fromEntries(
       Object.entries(cfg.endpoints).map(([pid, ep]) => [

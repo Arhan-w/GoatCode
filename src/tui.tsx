@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Agent, type AgentEvent } from "./agent.ts";
 import { COMMAND_DESC, SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
 import { appDir, loadConfig, saveConfig, splitModel, type GoatConfig } from "./config.ts";
+import { contextPct } from "./window.ts";
 import { ProviderRegistry } from "./providers.ts";
 import { resolveSmall, resolveFallbacks, ResolveError, resolve } from "./runtime.ts";
 import { Session } from "./session.ts";
@@ -172,6 +173,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [verb, setVerb] = useState("Thinking");
   const [elapsed, setElapsed] = useState(0);
   const [tokens, setTokens] = useState(0);
+  const [ctxTok, setCtxTok] = useState(0); // real prompt tokens of the last API call
   const [perm, setPerm] = useState<PermRequest | null>(null);
   const [permSel, setPermSel] = useState(0);
   const [completions, setCompletions] = useState<string[]>([]);
@@ -364,6 +366,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           case "usage": {
             const mm = ev.text.match(/(\d+)\+(\d+)/);
             if (mm) setTokens(Number(mm[2]));
+            if (ev.usage) setCtxTok(ev.usage.prompt + (ev.usage.cacheRead ?? 0) + (ev.usage.cacheWrite ?? 0));
             break;
           }
           case "todo":
@@ -766,6 +769,12 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
             {"  (shift+tab to cycle)  ·  "}{cfg.model}
             {"  ·  "}{shortPath(session.cwd)}
             {"  ·  "}
+            {(() => {
+              const pct = contextPct(cfg.modelId, ctxTok, cfg.contextWindow);
+              if (pct == null) return null;
+              const c = pct > 0.9 ? RED : pct > 0.7 ? "#facc15" : DIM;
+              return <Text color={c}>{`ctx ${Math.round(pct * 100)}%  ·  `}</Text>;
+            })()}
             {mcp?.servers.size ? `${mcp.servers.size} mcp · ` : ""}
             {skills.length ? `${skills.length} skills · ` : ""}
             <Text color={ACCENT}>/help</Text>

@@ -11,6 +11,7 @@ import type { ProviderRegistry } from "./providers.ts";
 import { CredentialStore, OAUTH_PROVIDERS, type Credential } from "./providers.ts";
 import { Session, listSessions, allSessions } from "./session.ts";
 import { cacheSavings, costUsd, fmtUsd } from "./pricing.ts";
+import { contextWindow } from "./window.ts";
 import { contentChars, estimateTokens, textOf } from "./llm.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
@@ -292,6 +293,8 @@ export function runSlash(line: string, io: SlashIO): boolean {
       io.push(<Text>  context window: {ctx.length} messages · ~{est.toLocaleString()} tokens{imgs ? ` · ${imgs} image(s)` : ""} (estimate)</Text>);
       if (io.session.usage.in)
         io.push(<Text dimColor color="#8a8a8a">  last measured from API: {io.session.usage.in.toLocaleString()} prompt / {io.session.usage.out.toLocaleString()} completion</Text>);
+      const win = io.cfg.contextWindow ?? contextWindow(io.cfg.modelId);
+      io.push(<Text>  model window: {win.toLocaleString()} tokens · ~{Math.round((est / win) * 100)}% used{io.session.usage.cacheRead ? ` · ${(io.session.usage.cacheRead ?? 0).toLocaleString()} tok served from cache` : ""}</Text>);
       return true;
     }
 

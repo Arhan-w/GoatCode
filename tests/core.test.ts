@@ -355,6 +355,21 @@ describe("pricing", () => {
   });
 });
 
+// ---------- context windows ----------
+describe("context windows", () => {
+  test("window map + true meter", async () => {
+    const { contextWindow, contextPct } = await import("../src/window.ts");
+    expect(contextWindow("claude-sonnet-4-5")).toBe(200_000);
+    expect(contextWindow("gpt-5-codex")).toBe(400_000);
+    expect(contextWindow("gemini-2.5-pro")).toBe(1_000_000);
+    expect(contextWindow("mystery-model")).toBe(128_000);
+    expect(contextPct("claude-sonnet-4-5", 60_000)).toBeCloseTo(0.3);
+    expect(contextPct("claude-sonnet-4-5", 0)).toBeNull(); // no measurement yet
+    expect(contextPct("claude-sonnet-4-5", 999_999_999)).toBe(1); // clamped
+    expect(contextPct("claude-sonnet-4-5", 50_000, 100_000)).toBeCloseTo(0.5); // override
+  });
+});
+
 // ---------- prompt caching ----------
 describe("prompt caching", () => {
   test("anthropic payload: cache=true wraps system+last tool with cache_control", async () => {
