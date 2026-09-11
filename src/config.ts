@@ -84,7 +84,29 @@ function parseJson(path: string): Record<string, any> {
   }
 }
 
+/**
+ * Claude-Code-style model aliases. `goat -m sonnet` / `/model opus` expand to
+ * the full provider/model id before splitting, so muscle memory from other
+ * agents works here. Only exact lowercase matches expand.
+ */
+export const MODEL_ALIASES: Record<string, string> = {
+  sonnet: "anthropic/claude-sonnet-4-5",
+  opus: "anthropic/claude-opus-4-1",
+  haiku: "anthropic/claude-haiku-4-5",
+  gpt: "openai/gpt-5-codex",
+  codex: "openai/gpt-5-codex",
+  gemini: "gemini/gemini-2.5-pro",
+  grok: "xai/grok-4",
+  deepseek: "deepseek/deepseek-chat",
+};
+
+export function expandModelAlias(model: string): string {
+  const a = MODEL_ALIASES[model.trim().toLowerCase()];
+  return a ?? model;
+}
+
 export function splitModel(cfg: GoatConfig): void {
+  cfg.model = expandModelAlias(cfg.model);
   const i = cfg.model.indexOf("/");
   if (i > 0) {
     cfg.provider = cfg.model.slice(0, i);

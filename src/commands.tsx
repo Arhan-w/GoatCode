@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GoatConfig } from "./config.ts";
-import { appDir, configPath, saveConfig, splitModel } from "./config.ts";
+import { appDir, configPath, saveConfig, splitModel, MODEL_ALIASES } from "./config.ts";
 import type { ProviderRegistry } from "./providers.ts";
 import { CredentialStore, OAUTH_PROVIDERS, type Credential } from "./providers.ts";
 import { Session, listSessions, allSessions } from "./session.ts";
@@ -68,14 +68,15 @@ export function runSlash(line: string, io: SlashIO): boolean {
     case "/model": {
       if (!arg) {
         io.push(<Text>current model: <Text color="#a855f7">{io.cfg.model}</Text></Text>);
+        io.push(<Text dimColor color="#8a8a8a">  aliases: {Object.keys(MODEL_ALIASES).join(" · ")} — e.g. /model sonnet</Text>);
         return true;
       }
       const next = { ...io.cfg, model: arg };
-      splitModel(next);
+      splitModel(next); // expands aliases too
       io.setCfg(next);
       io.saveCfg(next);
-      io.session.model = arg;
-      io.push(<Text color="#4ade80">✓ model → {arg}</Text>);
+      io.session.model = next.model;
+      io.push(<Text color="#4ade80">✓ model → {next.model}</Text>);
       return true;
     }
 

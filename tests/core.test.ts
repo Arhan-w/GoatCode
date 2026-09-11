@@ -27,6 +27,19 @@ afterEach(() => {
 
 // ---------- config ----------
 describe("config", () => {
+  test("model aliases expand before split", async () => {
+    const { expandModelAlias, splitModel, MODEL_ALIASES } = await import("../src/config.ts");
+    expect(expandModelAlias("sonnet")).toBe("anthropic/claude-sonnet-4-5");
+    expect(expandModelAlias("Opus")).toBe(MODEL_ALIASES.opus); // case-insensitive
+    expect(expandModelAlias("anthropic/claude-opus-4-1")).toBe("anthropic/claude-opus-4-1"); // passthrough
+    expect(expandModelAlias("weird/model")).toBe("weird/model");
+    const cfg = { model: "haiku" } as any;
+    splitModel(cfg);
+    expect(cfg.model).toBe("anthropic/claude-haiku-4-5");
+    expect(cfg.provider).toBe("anthropic");
+    expect(cfg.modelId).toBe("claude-haiku-4-5");
+  });
+
   test("layered load: env overrides file", async () => {
     const { loadConfig, saveConfig, splitModel } = await import("../src/config.ts");
     process.env.GOAT_MODEL = "groq/llama-3.3-70b";
