@@ -33,7 +33,10 @@ BUN = os.environ.get("GOAT_BUN", str(Path.home() / ".bun" / "bin" / "bun.exe"))
 ROWS, COLS = 34, 96
 
 DEMO = os.environ.get("GOAT_DEMO", "read")
-DEMO_QUESTION = "what does @t.txt say?"
+DEMO_QUESTION = {
+    "write": "create notes.txt with the line: hello from the goat pen",
+    "todo": "track a 3-step plan: scan, group, triage",
+}.get(DEMO, "what does @t.txt say?")
 
 
 def truecolor_fg(c) -> tuple[int, int, int] | None:
@@ -194,8 +197,12 @@ def main() -> None:
         drain(0.055)
         snap()
         last_snap[0] = 0
-    p.write("\r")
+    p.write(chr(13))
     # let the agent turn stream: tool call, result, streamed answer
+    # auto-approve the permission dialog when the demo writes a file
+    if DEMO == "write":
+        drain(6.0)
+        p.write("\r")  # Enter = Yes on the dialog
     drain(24.0)
     snap()  # guarantee the final frame is the settled state
 

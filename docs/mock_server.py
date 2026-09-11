@@ -60,7 +60,7 @@ elif DEMO == "long":
               " ".join(f"Observation {i} on module {i%7}: the boundary contracts here are respected and the failure modes degrade gracefully." for i in range(1, 26)))
 elif DEMO == "write":
     INTRO = "I'll create a new file with that content."
-    TOOL_NAME, TOOL_ARGS = "write", {"path": "notes.txt", "content": "hello from the goat pen\\n"}
+    TOOL_NAME, TOOL_ARGS = "write", {"path": "notes.txt", "content": "hello from the goat pen\n"}
     ANSWER = "Created notes.txt with the content you requested."
 else:  # read
     INTRO = "Let me take a look at that file."
@@ -111,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "function": {"name": TOOL_NAME, "arguments": ""}}]}}]}))
                 # For write tool, we need to pass the arguments as a JSON string
                 if TOOL_NAME == "write":
-                    args_json = json.dumps({"path": "notes.txt", "content": "hello from the goat pen\\n"})
+                    args_json = json.dumps({"path": "notes.txt", "content": "hello from the goat pen\n"})
                     self.wfile.write(sse({"choices": [{"delta": {
                         "tool_calls": [{"index": 0, "function": {
                             "arguments": args_json}}]}}]}))

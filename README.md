@@ -19,7 +19,7 @@ Bring any of 180+ providers, or log in with the subscriptions you already pay fo
 npm install -g goatcode-cli
 ```
 
-[Install](#install) · [Why GoatCode](#why-goatcode) · [Never stop coding](#never-stop-coding) · [Providers](#providers) · [Desktop control](#desktop-control) · [MCP · Skills · Plugins](#mcp--skills--plugins) · [Slash commands](#slash-commands) · [Config](#configuration)
+[Install](#install) · [Why GoatCode](#why-goatcode) · [Never stop coding](#never-stop-coding) · [Diffs & rewind](#see-every-change-rewind-any-mistake) · [Providers](#providers) · [Desktop control](#desktop-control) · [MCP · Skills · Plugins](#mcp--skills--plugins) · [Slash commands](#slash-commands) · [Config](#configuration)
 
 </div>
 
@@ -40,6 +40,11 @@ your terminal, your keys, your existing plans.
 | MCP servers / SKILL.md skills / plugins | ✅ ✅ ✅ | ✅ ❌ plugins | ❌ | ✅ |
 | Single static binary (no runtime install) | ✅ Bun-compiled, 5 platforms | Node | Node | various |
 | Live session cost in USD | ✅ `/usage all` | partial | ❌ | varies |
+| **Prompt caching** (sessions up to 90% cheaper) | ✅ automatic + savings in `/cost` | silent | ❌ | varies |
+| **`/rewind`** — jump back any turn, files restored | ✅ transcript + files | ✅ | ❌ | ❌ |
+| **Parallel subagents** (3 at once) | ✅ | ❌ serial | ❌ | ❌ |
+| **Session search** across all history | ✅ `/search` | ❌ | ❌ | ❌ |
+| Inline diff after every edit | ✅ colored, in-place | ✅ | partial | varies |
 
 Not a comparison chart trick — every cell is a feature you can test in sixty seconds below.
 
@@ -91,6 +96,27 @@ Real capture — three 429 retries, the switch, then the full tool-call answer, 
 
 Background work gets its own budget too: set `small_model` and compaction + explore-subagents
 route to the cheap model automatically while your main turn stays on the frontier one.
+
+---
+
+## See every change, rewind any mistake
+
+Every `write`/`edit` prints a colored inline diff the moment it lands — and `/rewind 4` puts the
+whole session (transcript **and** files) back to how it was at turn 4. Nothing is ever unrecoverable.
+
+```bash
+/rewind        # list recent turns to jump back to
+/search oauth  # full-text search across every saved session
+/model sonnet  # aliases — no need to remember model ids
+```
+
+Real capture — a write, its inline diff, and the live `ctx` meter in the footer:
+
+![Inline unified diff after a write, with live context meter](docs/assets/demo-diff.gif)
+
+Under the hood, long sessions get **automatic prompt caching**: the system prompt and tool
+definitions are cached between turns, so repeated context bills at 10% of input price.
+`/cost` shows exactly what the cache saved you this session.
 
 ---
 
@@ -192,6 +218,7 @@ Unknown models show honest zeros and a `no price known` note instead of a made-u
 | `/cost` this session | `/usage all` dashboard | `/context` token window | `/doctor` health check |
 | `/init` write GOAT.md | `/review` code review | `/undo` revert last edits | `/tasks` background jobs |
 | `/memory` show GOAT.md | `/status` providers+model | `/export` transcript md | `/help` everything |
+| `/rewind` back to any turn | `/search` all sessions | `/permissions` session rules | `/model sonnet` aliases |
 
 Keys: `shift+tab` cycles ask → accept-edits → plan → bypass · `ctrl+t` task panel ·
 `ctrl+v` attach image · `esc` interrupt.
