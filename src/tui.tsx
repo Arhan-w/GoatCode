@@ -92,7 +92,7 @@ const MODE_LABEL: Record<Mode, string> = {
   default: "ask before edits",
   acceptEdits: "⏵⏵ accept edits on",
   plan: "⏸ plan mode on",
-  bypass: "⏩ bypass permissions on",
+  bypass: "🐐 GOAT MODE — unchained",
 };
 const MODE_ORDER: Mode[] = ["default", "acceptEdits", "plan", "bypass"];
 
@@ -186,6 +186,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [tokens, setTokens] = useState(0);
   const [ctxTok, setCtxTok] = useState(0); // real prompt tokens of the last API call
   const [perm, setPerm] = useState<PermRequest | null>(null);
+  const permRef = useRef<PermRequest | null>(null);
+  permRef.current = perm;
   const toolQueueOpen = useRef(false);
   /** Tools the user chose "always allow (session)" for — in memory only. */
   const sessionRules = useRef<Set<string>>(new Set());
@@ -305,7 +307,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       tools.sessionId = sessionRef.current.id;
       // acceptEdits auto-approves file edits, still asks for bash (Claude semantics)
       tools.permission = (t, a) =>
-        m === "acceptEdits" && (t === "write" || t === "edit") ? true
+        modeRef.current === "bypass" ? true
+        : modeRef.current === "acceptEdits" && (t === "write" || t === "edit") ? true
         : sessionRules.current.has(t) ? true
         : askPermission(t, a);
       if (mcp)
@@ -585,7 +588,12 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           return { files: res.files, msgs: s.messages.length };
         },
         backgroundTasks: () => toolsRef.current?.backgroundTasks() ?? [],
-        setMode: (m) => { setMode(m); setCfg((c) => ({ ...c, autoApprove: m === "bypass" })); },
+        setMode: (m) => {
+          setMode(m);
+          setCfg((c) => ({ ...c, autoApprove: m === "bypass" }));
+          const tk = toolsRef.current;
+          if (tk) { tk.autoApprove = m === "bypass"; tk.readonly = m === "plan"; }
+        },
         reloadPlugins: () => {
           const pl = loadPlugins(cfgRef.current.pluginDirs.map((d) => resolvePath(process.cwd(), d)));
           const fromPlugins = pluginSkills(pl);
@@ -615,12 +623,28 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   submitRef.current = submit;
 
   const cycleMode = useCallback(() => {
+    // entering bypass resolves any open permission prompt YES — the user just
+    // said "stop asking"; leaving bypass leaves a pending prompt alone
+    if (modeRef.current !== "bypass" && permRef.current) {
+      permRef.current.resolve(true);
+      setPerm(null);
+      nextPerm();
+    }
     setMode((m) => {
       const next = MODE_ORDER[(MODE_ORDER.indexOf(m) + 1) % MODE_ORDER.length];
       setCfg((c) => ({ ...c, autoApprove: next === "bypass" }));
+      // apply to the RUNNING turn immediately — a mid-turn switch must take
+      // effect now, not at the next buildAgent (this was the bypass bug)
+      const tk = toolsRef.current;
+      if (tk) {
+        tk.autoApprove = next === "bypass";
+        tk.readonly = next === "plan";
+      }
+      if (next === "bypass")
+        push(<Text color="#facc15">  🐐 GOAT MODE — every tool auto-approves, no prompts. shift+tab to step back.</Text>);
       return next;
     });
-  }, []);
+  }, [push]);
 
   // keyboard handling
   useInput((ch, k) => {
@@ -836,7 +860,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       ) : (
         <Box paddingLeft={1}>
           <Text dimColor color={DIM}>
-            <Text color={mode === "default" ? DIM : ACCENT}>{MODE_LABEL[mode]}</Text>
+            <Text color={mode === "default" ? DIM : mode === "bypass" ? "#facc15" : ACCENT}>{MODE_LABEL[mode]}</Text>
             {"  (shift+tab to cycle)  ·  "}{cfg.model}
             {"  ·  "}{shortPath(session.cwd)}
             {"  ·  "}

@@ -220,7 +220,7 @@ Unknown models show honest zeros and a `no price known` note instead of a made-u
 | `/memory` show GOAT.md | `/status` providers+model | `/export` transcript md | `/help` everything |
 | `/rewind` back to any turn | `/search` all sessions | `/permissions` session rules | `/model sonnet` aliases |
 
-Keys: `shift+tab` cycles ask → accept-edits → plan → bypass · `ctrl+t` task panel ·
+Keys: `shift+tab` cycles ask → accept-edits → plan → **🐐 GOAT MODE** (bypass — every tool auto-approves, mid-turn, no prompts) · `ctrl+t` task panel ·
 `ctrl+v` attach image · `esc` interrupt.
 
 ## CLI
