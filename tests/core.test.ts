@@ -355,6 +355,36 @@ describe("pricing", () => {
   });
 });
 
+// ---------- @file completion ----------
+describe("@file completion", () => {
+  test("listProjectFiles walks with SKIP_DIRS and dotfile rules", async () => {
+    const { listProjectFiles } = await import("../src/refs.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-at-"));
+    mkdirSync(join(root, "src"), { recursive: true });
+    mkdirSync(join(root, "node_modules", "x"), { recursive: true });
+    mkdirSync(join(root, ".git"), { recursive: true });
+    writeFileSync(join(root, "src", "tui.tsx"), "x");
+    writeFileSync(join(root, "readme.md"), "x");
+    writeFileSync(join(root, "node_modules", "x", "i.js"), "x");
+    writeFileSync(join(root, ".git", "config"), "x");
+    const files = listProjectFiles(root);
+    expect(files).toContain("src/tui.tsx");
+    expect(files).toContain("src/");
+    expect(files).toContain("readme.md");
+    expect(files.some((f) => f.includes("node_modules"))).toBe(false);
+    expect(files.some((f) => f.includes(".git"))).toBe(false);
+  });
+
+  test("atCompletions matches prefixes and basenames", async () => {
+    const { atCompletions } = await import("../src/refs.ts");
+    const files = ["src/tui.tsx", "src/tools.ts", "docs/a.md", "tui.css"];
+    expect(atCompletions("src/t", files)).toEqual(["src/tui.tsx", "src/tools.ts"]);
+    expect(atCompletions("tui", files)).toContain("tui.css"); // basename match
+    expect(atCompletions("src/", files).length).toBe(2);
+    expect(atCompletions("zzz", files)).toEqual([]);
+  });
+});
+
 // ---------- diff ----------
 describe("diff", () => {
   test("unifiedDiff marks adds/removes/context and stats", async () => {

@@ -4,8 +4,43 @@
  * plain strings now; the TUI wraps them into its own nodes.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { relative, resolve as resolvePath } from "node:path";
-import { MAX_IMAGE_BYTES, sniffImage } from "./tools.ts";
+import { join, relative, resolve as resolvePath } from "node:path";
+import { MAX_IMAGE_BYTES, SKIP_DIRS, sniffImage } from "./tools.ts";
+
+/**
+ * Project files for @-mention completion: relative POSIX paths, SKIP_DIRS
+ * honored, capped. Directories appear with a trailing "/" so Tab can descend.
+ */
+export function listProjectFiles(cwd: string, limit = 2000): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (out.length >= limit) return;
+      if (e.name.startsWith(".") && e.name !== ".env.example") continue;
+      const abs = join(dir, e.name);
+      const rel = relative(cwd, abs).replaceAll("\\", "/");
+      if (e.isDirectory()) {
+        if (SKIP_DIRS.has(e.name)) continue;
+        out.push(rel + "/");
+        walk(abs);
+      } else out.push(rel);
+    }
+  };
+  walk(cwd);
+  return out.sort();
+}
+
+/** Completion candidates for an @token (the text after "@", may contain "/"). */
+export function atCompletions(token: string, files: string[], cap = 8): string[] {
+  const t = token.toLowerCase();
+  const hits = files.filter((f) => f.toLowerCase().startsWith(t));
+  // if the token has no slash, also match basenames (src/tui -> tui.tsx under src)
+  const extra = t.includes("/") ? [] : files.filter(
+    (f) => !f.toLowerCase().startsWith(t) && (f.split("/").pop() ?? "").toLowerCase().startsWith(t));
+  return [...hits, ...extra].slice(0, cap);
+}
 import type { ContentPart } from "./llm.ts";
 
 /** Replace @path tokens with fenced file contents (sandboxed to cwd). */

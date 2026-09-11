@@ -17,6 +17,13 @@ import { Agent, type AgentEvent } from "./agent.ts";
 import { COMMAND_DESC, SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
 import { appDir, loadConfig, saveConfig, splitModel, type GoatConfig } from "./config.ts";
 import { contextPct } from "./window.ts";
+import { atCompletions, listProjectFiles } from "./refs.ts";
+
+/** Replace the trailing token (slash line or @token) with the completion. */
+function acceptCompletion(input: string, kind: "slash" | "at", value: string): string {
+  if (kind === "slash") return value + " ";
+  return input.replace(/@[^\s]*$/, "@" + value + " ");
+}
 import { unifiedDiff, diffStats } from "./diff.ts";
 import { ProviderRegistry } from "./providers.ts";
 import { resolveSmall, resolveFallbacks, ResolveError, resolve } from "./runtime.ts";
@@ -181,6 +188,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const sessionRules = useRef<Set<string>>(new Set());
   const [permSel, setPermSel] = useState(0);
   const [completions, setCompletions] = useState<string[]>([]);
+  const [compKind, setCompKind] = useState<"slash" | "at">("slash");
   const [compSel, setCompSel] = useState(0);
   const [thinkLine, setThinkLine] = useState("");
   const [pasted, setPasted] = useState<string | null>(null); // ctrl+V image path
@@ -476,8 +484,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     // Enter with the completion menu open accepts, like Claude Code
-    if (completions.length > 0 && compSel < completions.length && text.startsWith("/")) {
-      setInput(completions[compSel] + " ");
+    if (completions.length > 0 && compSel < completions.length) {
+      setInput(acceptCompletion(text, compKind, completions[compSel]));
       setCompletions([]);
       return;
     }
@@ -714,17 +722,29 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     if (k.tab && completions.length) {
-      setInput(completions[compSel] + " ");
+      setInput(acceptCompletion(input, compKind, completions[compSel]));
       setCompletions([]);
     }
   });
 
-  // live completion as the user types a slash command
+  // live completion: slash commands at line start, @file refs in the last token
   useEffect(() => {
     if (input.startsWith("/") && !input.includes(" ")) {
+      setCompKind("slash");
       setCompletions(SLASH_COMMANDS.filter((c) => c.startsWith(input)).slice(0, 8));
       setCompSel(0);
-    } else setCompletions([]);
+      return;
+    }
+    const m = input.match(/(^|\s)@([^\s]*)$/);
+    if (m) {
+      const token = m[2];
+      const files = listProjectFiles(sessionRef.current.cwd);
+      setCompKind("at");
+      setCompletions(atCompletions(token, files));
+      setCompSel(0);
+      return;
+    }
+    setCompletions([]);
   }, [input]);
 
   // custom statusline: refresh on mode/session changes, during thinking, and
@@ -798,8 +818,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           <Box flexDirection="column" paddingLeft={2}>
             {completions.map((c, i) => (
               <Text key={c}>
-                <Text color={i === compSel ? ACCENT : undefined} inverse={i === compSel}>{c}</Text>
-                <Text dimColor color={DIM}>  {COMMAND_DESC[c]}</Text>
+                <Text color={i === compSel ? ACCENT : undefined} inverse={i === compSel}>{compKind === "at" ? "@" + c : c}</Text>
+                {compKind === "slash" && <Text dimColor color={DIM}>  {COMMAND_DESC[c]}</Text>}
               </Text>
             ))}
           </Box>
