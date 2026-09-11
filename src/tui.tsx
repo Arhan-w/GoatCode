@@ -182,6 +182,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [statusLines, setStatusLines] = useState<string[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
+  const queuedRef = useRef<string[]>([]);
+  const submitRef = useRef<((raw: string) => void) | null>(null);
   const lastCtrlC = useRef(0);
   const lineKey = useRef(0);
   const toolsRef = useRef<ToolKit | null>(null);
@@ -408,6 +410,12 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       abortRef.current = null;
       setAuthBanner(null); // a successful turn means credentials are fine
       sessionRef.current.save();
+      // drain one queued mid-turn message (⤷ steering); recursion through
+      // submit->runTurn handles any that arrive during its turn
+      if (queuedRef.current.length && !ctrl.signal.aborted) {
+        const q = queuedRef.current.shift()!;
+        setTimeout(() => submitRef.current?.(q), 50);
+      }
       // notify finished background tasks (Claude Code does this between turns)
       for (const t of agent.tools.backgroundTasks()) {
         if (t.status !== "running" && !notifiedBg.current.has(t.id)) {
@@ -425,7 +433,16 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
 
   const submit = useCallback((raw: string) => {
     const text = raw.trim();
-    if (!text || thinking) return;
+    if (!text) return;
+    // Mid-turn steering (Claude Code / Codex parity): typing while the agent
+    // works queues the message for immediate follow-up instead of dropping it.
+    if (thinking) {
+      setInput("");
+      setCompletions([]);
+      queuedRef.current.push(text);
+      push(<Text dimColor color={DIM}>  ⤷ queued for next turn ({queuedRef.current.length})</Text>);
+      return;
+    }
     // Enter with the completion menu open accepts, like Claude Code
     if (completions.length > 0 && compSel < completions.length && text.startsWith("/")) {
       setInput(completions[compSel] + " ");
@@ -538,6 +555,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     }
     void runTurn(expanded);
   }, [thinking, push, mcp, skills, exit, runTurn, completions, compSel, pasted]);
+  submitRef.current = submit;
 
   const cycleMode = useCallback(() => {
     setMode((m) => {

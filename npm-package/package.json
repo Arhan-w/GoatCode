@@ -1,6 +1,6 @@
 {
   "name": "goatcode-cli",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "description": "GoatCode — open-source terminal coding agent. Any provider (183), your subscriptions (Claude/ChatGPT/Gemini/Copilot OAuth), MCP, skills, built-in desktop control. One binary.",
   "keywords": ["ai", "cli", "coding-agent", "agent", "terminal", "llm", "mcp", "anthropic", "openai", "gemini", "copilot", "developer-tools", "skills", "automation"],
   "license": "MIT",

@@ -419,7 +419,12 @@ export class ToolKit {
       child.on("close", (code) => {
         clearTimeout(timer);
         const combined = out + (err ? `\n[stderr]\n${err}` : "");
-        const capped = combined.slice(0, MAX_BASH_OUTPUT);
+        // keep head AND tail: for builds/tests the actionable error is at the end
+        const capped = combined.length > MAX_BASH_OUTPUT
+          ? combined.slice(0, MAX_BASH_OUTPUT * 0.6) +
+            `\n\n… ${(combined.length - MAX_BASH_OUTPUT * 0.7) | 0} bytes elided (tail kept) …\n\n` +
+            combined.slice(-MAX_BASH_OUTPUT * 0.4)
+          : combined;
         const tail = code === 0 ? "" : `\n[exit code ${code}]`;
         done({ ok: code === 0, output: (capped.trim() || "(no output)") + tail });
       });
