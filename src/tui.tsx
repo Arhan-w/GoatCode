@@ -41,12 +41,15 @@ import { contentChars, estimateTokens } from "./llm.ts";
 import type { ContentPart } from "./llm.ts";
 import type { Todo } from "./tools.ts";
 
-// ---------- theme (goat violet) ----------
+// ---------- theme (goat noir: deep slate + black-green) ----------
 export const ACCENT = "#a855f7";
-const DIM = "#8a8a8a";
+const DIM = "#7c8390";        // slate gray — sits between the two darks
 const GREEN = "#4ade80";
 const RED = "#f87171";
-const BORDER = "#555555";
+const BORDER = "#25262D";     // panel slate
+const BG_DEEP = "#000F08";    // black-green — input box / dialogs
+const BG_PANEL = "#25262D";   // deep slate — secondary surfaces
+const YELL = "#facc15";
 
 const SPINNER_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽"];
 const VERBS = [
@@ -772,7 +775,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       </Static>
 
       {authBanner && (
-        <Box flexDirection="column" borderStyle="round" borderColor="#facc15" paddingX={1} marginY={1}>
+        <Box flexDirection="column" borderStyle="round" borderColor="#facc15" paddingX={1} marginY={1} backgroundColor={BG_PANEL}>
           <Text color="#facc15" bold>⚠  GoatCode is installed but not ready yet</Text>
           <Text dimColor color={DIM}>{authBanner}</Text>
           <Text dimColor color={DIM}>  then type a message and hit Enter, or run /auth to fix it now</Text>
@@ -805,7 +808,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       )}
 
       <Box flexDirection="column">
-        <Box borderStyle="round" borderColor={thinking ? BORDER : ACCENT} paddingLeft={1}>
+        <Box borderStyle="round" borderColor={thinking ? BORDER : ACCENT} paddingLeft={1} backgroundColor={BG_DEEP}>
           <Text color={ACCENT} bold>❯ </Text>
           <TextInput
             value={input}
@@ -818,7 +821,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           <Box flexDirection="column" paddingLeft={2}>
             {completions.map((c, i) => (
               <Text key={c}>
-                <Text color={i === compSel ? ACCENT : undefined} inverse={i === compSel}>{compKind === "at" ? "@" + c : c}</Text>
+                <Text color={i === compSel ? ACCENT : undefined} backgroundColor={i === compSel ? BG_PANEL : undefined} bold={i === compSel}>{compKind === "at" ? "@" + c : c}</Text>
                 {compKind === "slash" && <Text dimColor color={DIM}>  {COMMAND_DESC[c]}</Text>}
               </Text>
             ))}
@@ -927,7 +930,7 @@ function PermDialog({ req, sel }: { req: PermRequest; sel: number }) {
     "No, and tell GoatCode what to do differently",
   ];
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={ACCENT} paddingX={1} marginY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={ACCENT} paddingX={1} marginY={1} backgroundColor={BG_PANEL}>
       <Text bold>● {req.tool} — allow?</Text>
       <Text dimColor color={DIM}>  {detail}</Text>
       <Text> </Text>

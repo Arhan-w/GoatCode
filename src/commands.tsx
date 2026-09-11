@@ -73,7 +73,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
     case "/model": {
       if (!arg) {
         io.push(<Text>current model: <Text color="#a855f7">{io.cfg.model}</Text></Text>);
-        io.push(<Text dimColor color="#8a8a8a">  aliases: {Object.keys(MODEL_ALIASES).join(" · ")} — e.g. /model sonnet</Text>);
+        io.push(<Text dimColor color="#7c8390">  aliases: {Object.keys(MODEL_ALIASES).join(" · ")} — e.g. /model sonnet</Text>);
         return true;
       }
       const next = { ...io.cfg, model: arg };
@@ -107,14 +107,14 @@ export function runSlash(line: string, io: SlashIO): boolean {
             const has = io.registry.resolveCredential(p.id);
             return (
               <Text key={p.id}>
-                <Text color={has ? "#4ade80" : "#8a8a8a"}>{has ? "✓" : " "} </Text>
+                <Text color={has ? "#4ade80" : "#7c8390"}>{has ? "✓" : " "} </Text>
                 <Text>{p.id.padEnd(28)}</Text>
-                <Text dimColor color="#8a8a8a"> [{fmtShort(p.format)}] {p.baseUrl.slice(0, 48)}</Text>
+                <Text dimColor color="#7c8390"> [{fmtShort(p.format)}] {p.baseUrl.slice(0, 48)}</Text>
               </Text>
             );
           })}
-          {rows.length > 40 && <Text dimColor color="#8a8a8a">  … {rows.length - 40} more</Text>}
-          <Text dimColor color="#8a8a8a">  {ready}/{rows.length} configured</Text>
+          {rows.length > 40 && <Text dimColor color="#7c8390">  … {rows.length - 40} more</Text>}
+          <Text dimColor color="#7c8390">  {ready}/{rows.length} configured</Text>
         </Box>,
       );
       return true;
@@ -124,12 +124,12 @@ export function runSlash(line: string, io: SlashIO): boolean {
       if (arg === "--list" || (arg === "" && rest.includes("--list"))) {
         io.push(<Text>OAuth providers (run /auth &lt;id&gt; --oauth):</Text>);
         for (const [k, meta] of Object.entries(OAUTH_PROVIDERS))
-          io.push(<Text key={k}><Text color="#a855f7">{k.padEnd(16)}</Text><Text dimColor color="#8a8a8a">{meta.label}</Text></Text>);
+          io.push(<Text key={k}><Text color="#a855f7">{k.padEnd(16)}</Text><Text dimColor color="#7c8390">{meta.label}</Text></Text>);
         return true;
       }
       if (!arg) {
         io.push(<Text>usage: /auth &lt;provider&gt; --key &lt;K&gt; | --oauth | --list</Text>);
-        io.push(<Text dimColor color="#8a8a8a">  oauth: {Object.keys(OAUTH_PROVIDERS).join(", ")}</Text>);
+        io.push(<Text dimColor color="#7c8390">  oauth: {Object.keys(OAUTH_PROVIDERS).join(", ")}</Text>);
         return true;
       }
       const pid = arg;
@@ -175,10 +175,10 @@ export function runSlash(line: string, io: SlashIO): boolean {
     case "/compact": {
       const msgs = io.session.messages;
       if (msgs.length <= 12) {
-        io.push(<Text dimColor color="#8a8a8a">  nothing to compact yet — context is still small</Text>);
+        io.push(<Text dimColor color="#7c8390">  nothing to compact yet — context is still small</Text>);
         return true;
       }
-      io.push(<Text dimColor color="#8a8a8a">  ✻ summarizing context…</Text>);
+      io.push(<Text dimColor color="#7c8390">  ✻ summarizing context…</Text>);
       void io.compactNow().then((status) => io.push(<Text color="#4ade80">✓ {status}</Text>));
       return true;
     }
@@ -192,7 +192,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
               <Text color="#a855f7">{r.id}</Text>  {r.model.padEnd(34)} {r.title.slice(0, 52)}
             </Text>
           ))}
-          {rows.length === 0 && <Text dimColor color="#8a8a8a">  (no saved sessions)</Text>}
+          {rows.length === 0 && <Text dimColor color="#7c8390">  (no saved sessions)</Text>}
         </Box>,
       );
       return true;
@@ -201,14 +201,14 @@ export function runSlash(line: string, io: SlashIO): boolean {
     case "/search": {
       if (!arg) { io.push(<Text>usage: /search &lt;query&gt;   (then /resume &lt;id&gt; to jump in)</Text>); return true; }
       const hits = searchSessions(arg, 8);
-      if (!hits.length) { io.push(<Text dimColor color="#8a8a8a">  no saved session mentions "{arg}"</Text>); return true; }
+      if (!hits.length) { io.push(<Text dimColor color="#7c8390">  no saved session mentions "{arg}"</Text>); return true; }
       io.push(
         <Box flexDirection="column">
           <Text>  {hits.length} session(s) match "{arg}":</Text>
           {hits.map((h) => (
             <Text key={h.id}>
               <Text color="#a855f7">  /resume {h.id}</Text>
-              <Text dimColor color="#8a8a8a">  · {new Date(h.createdAt * 1000).toISOString().slice(0, 10)} · {h.hits}× · {h.snippet.slice(0, 72)}</Text>
+              <Text dimColor color="#7c8390">  · {new Date(h.createdAt * 1000).toISOString().slice(0, 10)} · {h.hits}× · {h.snippet.slice(0, 72)}</Text>
             </Text>
           ))}
         </Box>,
@@ -230,7 +230,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
 
     case "/mcp": {
       if (!io.mcp || io.mcp.servers.size === 0) {
-        io.push(<Text dimColor color="#8a8a8a">  no MCP servers connected — add to .mcp.json or config.json mcpServers</Text>);
+        io.push(<Text dimColor color="#7c8390">  no MCP servers connected — add to .mcp.json or config.json mcpServers</Text>);
         return true;
       }
       io.push(
@@ -238,7 +238,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
           {[...io.mcp.servers.values()].map((e) => (
             <Text key={e.name}>
               <Text color="#4ade80">✓ </Text>{e.name}
-              <Text dimColor color="#8a8a8a">  {e.tools.size} tools</Text>
+              <Text dimColor color="#7c8390">  {e.tools.size} tools</Text>
             </Text>
           ))}
         </Box>,
@@ -248,7 +248,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
 
     case "/skills": {
       if (!io.skills.length) {
-        io.push(<Text dimColor color="#8a8a8a">  no skills found — add ~/.goatcode/skills/&lt;name&gt;/SKILL.md</Text>);
+        io.push(<Text dimColor color="#7c8390">  no skills found — add ~/.goatcode/skills/&lt;name&gt;/SKILL.md</Text>);
         return true;
       }
       io.push(
@@ -256,7 +256,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
           {io.skills.map((sk) => (
             <Text key={sk.name}>
               <Text color="#a855f7">/{sk.name}</Text>
-              <Text dimColor color="#8a8a8a">  {sk.description}</Text>
+              <Text dimColor color="#7c8390">  {sk.description}</Text>
             </Text>
           ))}
         </Box>,
@@ -272,7 +272,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
       }
       const dirs = io.cfg.pluginDirs ?? [];
       if (!dirs.length) {
-        io.push(<Text dimColor color="#8a8a8a">  no plugin dirs — list dirs under "plugins" in config.json (commands/&lt;name&gt;.md + skills/&lt;name&gt;/SKILL.md)</Text>);
+        io.push(<Text dimColor color="#7c8390">  no plugin dirs — list dirs under "plugins" in config.json (commands/&lt;name&gt;.md + skills/&lt;name&gt;/SKILL.md)</Text>);
         return true;
       }
       const pl = loadPlugins(dirs);
@@ -283,7 +283,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
             return (
               <Text key={p.dir}>
                 <Text color="#4ade80">✓ </Text>{p.manifest.name ?? p.dir}
-                <Text dimColor color="#8a8a8a">  {sk.length} command/skill(s): {sk.map((s) => "/" + s.name).join(" ")}</Text>
+                <Text dimColor color="#7c8390">  {sk.length} command/skill(s): {sk.map((s) => "/" + s.name).join(" ")}</Text>
               </Text>
             );
           })}
@@ -301,7 +301,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
       if (cost != null)
         io.push(<Text color="#4ade80">  ≈ {fmtUsd(cost)} this session ({io.cfg.model} rates, live)</Text>);
       else
-        io.push(<Text dimColor color="#8a8a8a">  no price known for {io.cfg.model} — tokens still counted above</Text>);
+        io.push(<Text dimColor color="#7c8390">  no price known for {io.cfg.model} — tokens still counted above</Text>);
       const saved = cacheSavings(io.cfg.model, u);
       if (saved != null)
         io.push(<Text color="#a855f7">  ⚡ prompt cache: {(u.cacheRead ?? 0).toLocaleString()} tok read — saved ~{fmtUsd(saved)}</Text>);
@@ -314,7 +314,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
       const imgs = ctx.reduce((s, m) => s + (typeof m.content === "object" ? m.content.filter((p) => p.type === "image").length : 0), 0);
       io.push(<Text>  context window: {ctx.length} messages · ~{est.toLocaleString()} tokens{imgs ? ` · ${imgs} image(s)` : ""} (estimate)</Text>);
       if (io.session.usage.in)
-        io.push(<Text dimColor color="#8a8a8a">  last measured from API: {io.session.usage.in.toLocaleString()} prompt / {io.session.usage.out.toLocaleString()} completion</Text>);
+        io.push(<Text dimColor color="#7c8390">  last measured from API: {io.session.usage.in.toLocaleString()} prompt / {io.session.usage.out.toLocaleString()} completion</Text>);
       const win = io.cfg.contextWindow ?? contextWindow(io.cfg.modelId);
       io.push(<Text>  model window: {win.toLocaleString()} tokens · ~{Math.round((est / win) * 100)}% used{io.session.usage.cacheRead ? ` · ${(io.session.usage.cacheRead ?? 0).toLocaleString()} tok served from cache` : ""}</Text>);
       return true;
@@ -339,7 +339,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
       if (!p) io.push(<Text color="#f87171">✗ provider '{io.cfg.provider}' not in catalog</Text>);
       else if (!io.registry.resolveCredential(p.id)) io.push(<Text color="#f87171">✗ {p.id}: no credentials — /auth {p.id} --key …</Text>);
       else {
-        io.push(<Text dimColor color="#8a8a8a">  probing {p.baseUrl} …</Text>);
+        io.push(<Text dimColor color="#7c8390">  probing {p.baseUrl} …</Text>);
         void probeProvider(p.baseUrl).then((r) =>
           io.push(r.ok
             ? <Text color="#4ade80">✓ {p.id} reachable ({r.ms}ms, HTTP {r.status})</Text>
@@ -400,7 +400,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
       io.push(
         <Box flexDirection="column">
           <Text>  tokens: <Text color="#a855f7">{u.in.toLocaleString()}</Text> in · <Text color="#a855f7">{u.out.toLocaleString()}</Text> out · {turns || io.session.messages.length} turns</Text>
-          <Text dimColor color="#8a8a8a">  avg {avgIn.toLocaleString()} in/turn · {io.session.messages.length} messages · ~{Math.round(chars / 4).toLocaleString()} tok in history · compacted: {io.session.compactedFrom > 0 ? `first ${io.session.compactedFrom} msgs folded` : "no"}</Text>
+          <Text dimColor color="#7c8390">  avg {avgIn.toLocaleString()} in/turn · {io.session.messages.length} messages · ~{Math.round(chars / 4).toLocaleString()} tok in history · compacted: {io.session.compactedFrom > 0 ? `first ${io.session.compactedFrom} msgs folded` : "no"}</Text>
         </Box>,
       );
       if (rest.join(" ").trim() === "all" || rest.join(" ").trim() === "-a") {
@@ -423,23 +423,23 @@ export function runSlash(line: string, io: SlashIO): boolean {
         }
         io.push(
           <Box flexDirection="column" marginTop={1}>
-            <Text>  <Text bold color="#a855f7">all time</Text> · {all.length} sessions · {tin.toLocaleString()} in / {tout.toLocaleString()} out tokens · <Text color="#4ade80">{fmtUsd(tcost)}</Text>{unknownCost ? <Text dimColor color="#8a8a8a"> (some models unpriced)</Text> : null}</Text>
+            <Text>  <Text bold color="#a855f7">all time</Text> · {all.length} sessions · {tin.toLocaleString()} in / {tout.toLocaleString()} out tokens · <Text color="#4ade80">{fmtUsd(tcost)}</Text>{unknownCost ? <Text dimColor color="#7c8390"> (some models unpriced)</Text> : null}</Text>
           </Box>,
         );
         const days = [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 7);
         if (days.length) {
-          io.push(<Text dimColor color="#8a8a8a"> </Text>); io.push(<Text dimColor color="#8a8a8a">  days</Text>);
+          io.push(<Text dimColor color="#7c8390"> </Text>); io.push(<Text dimColor color="#7c8390">  days</Text>);
           for (const [day, b] of days)
             io.push(<Text>    {day}  {String(b.n).padStart(3)} sess  {b.in.toLocaleString().padStart(12)} in  {b.out.toLocaleString().padStart(10)} out  <Text color="#4ade80">{fmtUsd(b.cost)}</Text></Text>);
         }
         const models = [...byModel.entries()].sort((a, b) => (b[1].cost ?? 0) - (a[1].cost ?? 0)).slice(0, 6);
         if (models.length) {
-          io.push(<Text dimColor color="#8a8a8a"> </Text>); io.push(<Text dimColor color="#8a8a8a">  models</Text>);
+          io.push(<Text dimColor color="#7c8390"> </Text>); io.push(<Text dimColor color="#7c8390">  models</Text>);
           for (const [model, b] of models)
             io.push(<Text>    {model.padEnd(34).slice(0, 34)}  {b.in.toLocaleString().padStart(12)} in  {b.out.toLocaleString().padStart(10)} out  <Text color="#4ade80">{fmtUsd(b.cost)}</Text></Text>);
         }
       } else {
-        io.push(<Text dimColor color="#8a8a8a">  /usage all — cost across every stored session</Text>);
+        io.push(<Text dimColor color="#7c8390">  /usage all — cost across every stored session</Text>);
       }
       return true;
     }
@@ -449,7 +449,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
       const cred = io.registry.resolveCredential(io.cfg.provider);
       io.push(
         <Box flexDirection="column">
-          <Text>  model <Text color="#a855f7">{io.cfg.model}</Text>{p ? <Text dimColor color="#8a8a8a">  [{fmtShort(p.format)}]</Text> : null}</Text>
+          <Text>  model <Text color="#a855f7">{io.cfg.model}</Text>{p ? <Text dimColor color="#7c8390">  [{fmtShort(p.format)}]</Text> : null}</Text>
           <Text>  auth  {cred ? <Text color="#4ade80">✓ {cred.kind === "oauth" ? "oauth token" : "api key"} ({io.cfg.provider})</Text> : <Text color="#f87171">✗ no credentials for {io.cfg.provider} — /auth {io.cfg.provider} --key …</Text>}</Text>
           <Text>  ext   {io.mcp?.servers.size ?? 0} mcp · {io.skills.length} skills · plugins {io.cfg.pluginDirs?.length ?? 0}</Text>
           <Text>  sess  {io.session.id} · “{(io.session.title || "untitled").slice(0, 40)}” · {gitBranch(io.session.cwd)}</Text>
@@ -464,7 +464,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
         .filter((f) => existsSync(f))
         .map((f) => ({ f, text: readFileSync(f, "utf8") }));
       if (!rows.length) {
-        io.push(<Text dimColor color="#8a8a8a">  no memory yet — start a line with # or run /init to create GOAT.md</Text>);
+        io.push(<Text dimColor color="#7c8390">  no memory yet — start a line with # or run /init to create GOAT.md</Text>);
         return true;
       }
       io.push(
@@ -472,7 +472,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
           {rows.map(({ f, text }) => (
             <Box key={f} flexDirection="column">
               <Text color="#a855f7">  {f}</Text>
-              <Text dimColor color="#8a8a8a">{text.split("\n").slice(-12).map((l) => "    " + l).join("\n")}</Text>
+              <Text dimColor color="#7c8390">{text.split("\n").slice(-12).map((l) => "    " + l).join("\n")}</Text>
             </Box>
           ))}
         </Box>,
@@ -482,7 +482,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
 
     case "/permissions": {
       const rules = io.sessionRules();
-      if (!rules.length) io.push(<Text dimColor color="#8a8a8a">  no session rules — pick "always allow" on any prompt to add one (memory only, never saved)</Text>);
+      if (!rules.length) io.push(<Text dimColor color="#7c8390">  no session rules — pick "always allow" on any prompt to add one (memory only, never saved)</Text>);
       else io.push(
         <Box flexDirection="column">
           <Text>  always-allowed this session:</Text>
@@ -494,7 +494,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
 
     case "/rewind": {
       const marks = io.session.turnMarks;
-      if (!marks.length) { io.push(<Text dimColor color="#8a8a8a">  no rewindable turns yet (marks start with this release)</Text>); return true; }
+      if (!marks.length) { io.push(<Text dimColor color="#7c8390">  no rewindable turns yet (marks start with this release)</Text>); return true; }
       const n = parseInt(arg, 10);
       if (Number.isNaN(n)) {
         // picker: last 10 turns with their first user line
@@ -510,7 +510,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
             {rows.map((r) => (
               <Text key={r.idx}>
                 <Text color="#a855f7">  /rewind {r.idx + 1}</Text>
-                <Text dimColor color="#8a8a8a">  · {r.head || "(image turn)"}</Text>
+                <Text dimColor color="#7c8390">  · {r.head || "(image turn)"}</Text>
               </Text>
             ))}
           </Box>,
@@ -526,14 +526,14 @@ export function runSlash(line: string, io: SlashIO): boolean {
     case "/undo": {
       const r = io.undoTurn();
       if (r === null) io.push(<Text color="#f87171">✗ no tool kit yet — run a turn first</Text>);
-      else if (r === 0) io.push(<Text dimColor color="#8a8a8a">  nothing to undo from the last turn</Text>);
+      else if (r === 0) io.push(<Text dimColor color="#7c8390">  nothing to undo from the last turn</Text>);
       else io.push(<Text color="#4ade80">✓ reverted {r} file mutation{r > 1 ? "s" : ""} from the last turn</Text>);
       return true;
     }
 
     case "/tasks": {
       const rows = io.backgroundTasks();
-      if (!rows.length) { io.push(<Text dimColor color="#8a8a8a">  no background tasks</Text>); return true; }
+      if (!rows.length) { io.push(<Text dimColor color="#7c8390">  no background tasks</Text>); return true; }
       io.push(
         <Box flexDirection="column">
           {rows.map((t) => (
@@ -542,7 +542,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
               <Text color={t.status === "running" ? "#facc15" : t.status.startsWith("exit") ? "#f87171" : "#4ade80"}>
                 {t.status === "running" ? "● running" : "✓ done"}
               </Text>
-              <Text dimColor color="#8a8a8a">  {t.cmd.slice(0, 48)}</Text>
+              <Text dimColor color="#7c8390">  {t.cmd.slice(0, 48)}</Text>
             </Text>
           ))}
         </Box>,
@@ -591,7 +591,7 @@ async function oauthLogin(pid: string, io: SlashIO): Promise<void> {
     io.registry.store.put(pid, cred);
     io.clearAuthBanner();
     io.push(<Text color="#4ade80">✓ logged in to {pid}</Text>);
-    io.push(<Text dimColor color="#8a8a8a">  try: /model {pid}/{meta.model_prefix}-…</Text>);
+    io.push(<Text dimColor color="#7c8390">  try: /model {pid}/{meta.model_prefix}-…</Text>);
   } catch (e: any) {
     io.push(<Text color="#f87171">✗ login failed: {e?.message ?? String(e)}</Text>);
   }
@@ -653,14 +653,14 @@ function gitBranch(cwd: string): string {
 import { Box, Text } from "ink";
 
 function ExitNote() {
-  return <Text dimColor color="#8a8a8a">bye</Text>;
+  return <Text dimColor color="#7c8390">bye</Text>;
 }
 
 function HelpList() {
   return (
     <Box flexDirection="column">
       {SLASH_COMMANDS.map((c) => (
-        <Text key={c}><Text color="#a855f7">{c.padEnd(14)}</Text><Text dimColor color="#8a8a8a"> {descOf(c)}</Text></Text>
+        <Text key={c}><Text color="#a855f7">{c.padEnd(14)}</Text><Text dimColor color="#7c8390"> {descOf(c)}</Text></Text>
       ))}
     </Box>
   );
