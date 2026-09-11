@@ -355,6 +355,28 @@ describe("pricing", () => {
   });
 });
 
+// ---------- session search ----------
+describe("session search", () => {
+  test("searchSessions finds, ranks, snippets, skips corrupt", async () => {
+    const { Session, searchSessions } = await import("../src/session.ts");
+    const s1 = Session.new(process.cwd(), "mock/m");
+    s1.title = "auth bug";
+    s1.append({ role: "user", content: "fix the OAuth token refresh loop please" } as any);
+    s1.append({ role: "assistant", content: "the refresh loop is in oauth.ts" } as any);
+    s1.save();
+    const s2 = Session.new(process.cwd(), "mock/m");
+    s2.append({ role: "user", content: "totally unrelated css question" } as any);
+    s2.save();
+    const hits = searchSessions("oauth");
+    expect(hits.length).toBeGreaterThanOrEqual(1);
+    expect(hits[0].id).toBe(s1.id);
+    expect(hits[0].snippet.toLowerCase()).toContain("oauth");
+    expect(searchSessions("css").length).toBeGreaterThanOrEqual(1);
+    expect(searchSessions("")).toEqual([]);
+    expect(searchSessions("zzz-nothing-matches-xyz")).toEqual([]);
+  });
+});
+
 // ---------- @file completion ----------
 describe("@file completion", () => {
   test("listProjectFiles walks with SKIP_DIRS and dotfile rules", async () => {

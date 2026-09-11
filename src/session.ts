@@ -162,6 +162,53 @@ export function allSessions(): SessionSummary[] {
   return out.sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/**
+ * Full-text search across saved sessions (user + assistant text). Case-
+ * insensitive substring; newest-first; corrupt files skipped.
+ */
+export interface SessionHit {
+  id: string; title: string; model: string; createdAt: number;
+  snippet: string; hits: number;
+}
+
+export function searchSessions(query: string, limit = 20): SessionHit[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const dir = sessionsDir();
+  const out: SessionHit[] = [];
+  let files: string[];
+  try { files = readdirSync(dir).filter((f) => f.endsWith(".jsonl")); } catch { return []; }
+  for (const f of files) {
+    try {
+      const lines = readFileSync(join(dir, f), "utf8").split("\n").filter(Boolean);
+      let title = "", model = "", createdAt = 0, id = f.replace(/\.jsonl$/, "");
+      let hits = 0;
+      let snippet = "";
+      for (const line of lines) {
+        let obj: any;
+        try { obj = JSON.parse(line); } catch { continue; }
+        if (obj.meta) { title = obj.title ?? ""; model = obj.model ?? ""; createdAt = obj.createdAt ?? 0; id = obj.id ?? id; continue; }
+        if (obj.role !== "user" && obj.role !== "assistant") continue;
+        const text = typeof obj.content === "string" ? obj.content
+          : Array.isArray(obj.content) ? obj.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ") : "";
+        const low = text.toLowerCase();
+        let pos = low.indexOf(q), count = 0;
+        while (pos !== -1) { count++; pos = low.indexOf(q, pos + q.length); }
+        if (!count) continue;
+        hits += count;
+        if (!snippet) {
+          const at = low.indexOf(q);
+          const from = Math.max(0, at - 40);
+          snippet = (from > 0 ? "…" : "") + text.slice(from, at + q.length + 60).replace(/\s+/g, " ") + "…";
+        }
+      }
+      if (hits) out.push({ id, title, model, createdAt, snippet, hits });
+    } catch { /* skip unreadable */ }
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out.slice(0, limit);
+}
+
 /** Cheap deterministic digest used for compaction (no extra API call). */
 export function summarize(messages: Message[]): string {
   const parts: string[] = [];

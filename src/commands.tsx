@@ -9,7 +9,7 @@ import type { GoatConfig } from "./config.ts";
 import { appDir, configPath, saveConfig, splitModel, MODEL_ALIASES } from "./config.ts";
 import type { ProviderRegistry } from "./providers.ts";
 import { CredentialStore, OAUTH_PROVIDERS, type Credential } from "./providers.ts";
-import { Session, listSessions, allSessions } from "./session.ts";
+import { Session, listSessions, allSessions, searchSessions } from "./session.ts";
 import { cacheSavings, costUsd, fmtUsd } from "./pricing.ts";
 import { contextWindow } from "./window.ts";
 import { contentChars, estimateTokens, textOf } from "./llm.ts";
@@ -22,7 +22,7 @@ export const SLASH_COMMANDS = [
   "/help", "/model", "/models", "/providers", "/auth", "/logout",
   "/new", "/clear", "/compact", "/sessions", "/resume", "/rename", "/export",
   "/mcp", "/skills", "/plugin", "/cost", "/usage", "/context", "/config",
-  "/status", "/memory", "/doctor", "/init", "/review", "/undo", "/rewind", "/permissions", "/tasks", "/quit",
+  "/status", "/memory", "/doctor", "/init", "/review", "/undo", "/rewind", "/permissions", "/search", "/tasks", "/quit",
 ];
 
 export interface SlashIO {
@@ -193,6 +193,24 @@ export function runSlash(line: string, io: SlashIO): boolean {
             </Text>
           ))}
           {rows.length === 0 && <Text dimColor color="#8a8a8a">  (no saved sessions)</Text>}
+        </Box>,
+      );
+      return true;
+    }
+
+    case "/search": {
+      if (!arg) { io.push(<Text>usage: /search &lt;query&gt;   (then /resume &lt;id&gt; to jump in)</Text>); return true; }
+      const hits = searchSessions(arg, 8);
+      if (!hits.length) { io.push(<Text dimColor color="#8a8a8a">  no saved session mentions "{arg}"</Text>); return true; }
+      io.push(
+        <Box flexDirection="column">
+          <Text>  {hits.length} session(s) match "{arg}":</Text>
+          {hits.map((h) => (
+            <Text key={h.id}>
+              <Text color="#a855f7">  /resume {h.id}</Text>
+              <Text dimColor color="#8a8a8a">  · {new Date(h.createdAt * 1000).toISOString().slice(0, 10)} · {h.hits}× · {h.snippet.slice(0, 72)}</Text>
+            </Text>
+          ))}
         </Box>,
       );
       return true;

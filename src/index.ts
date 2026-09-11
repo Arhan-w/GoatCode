@@ -326,6 +326,17 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  if (sub === "search") {
+    const q = argv.slice(3).join(" ");
+    if (!q) { console.log("usage: goat search <query>"); return 1; }
+    const { searchSessions } = await import("./session.ts");
+    const hits = searchSessions(q, 12);
+    if (!hits.length) { console.log(`no saved session mentions "${q}"`); return 0; }
+    for (const h of hits)
+      console.log(`goat resume ${h.id}  · ${new Date(h.createdAt * 1000).toISOString().slice(0, 10)} · ${h.hits}x · ${h.snippet.slice(0, 72)}`);
+    return 0;
+  }
+
   if (sub === "resume") {
     await run(cfg, argv[1]);
     return 0;
