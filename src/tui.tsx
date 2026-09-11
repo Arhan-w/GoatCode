@@ -304,6 +304,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const runTurn = useCallback(async (text: string | ContentPart[]) => {
     const agent = await buildAgent();
     if (!agent) return;
+    // /rewind anchor: message count at the start of this user turn
+    sessionRef.current.turnMarks.push(sessionRef.current.messages.length);
     agent.tools.beginCheckpoint(); // /undo reverts everything from here on
     setThinking(true);
     setStream("");
@@ -531,6 +533,19 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         saveCfg: saveConfig, push, exit, mcp, skills,
         clearAuthBanner: () => setAuthBanner(null),
         undoTurn: () => toolsRef.current ? toolsRef.current.undoCheckpoint() : null,
+        rewindTurn: (n) => {
+          const t = toolsRef.current;
+          const s = sessionRef.current;
+          if (!t || !s.turnMarks.length) return null;
+          const idx = Math.max(0, Math.min(n - 1, s.turnMarks.length - 1));
+          const mark = s.turnMarks[idx];
+          const res = t.rewindTo(idx);
+          if (!res) return null;
+          s.messages = s.messages.slice(0, mark);
+          s.turnMarks = s.turnMarks.slice(0, idx);
+          s.save();
+          return { files: res.files, msgs: s.messages.length };
+        },
         backgroundTasks: () => toolsRef.current?.backgroundTasks() ?? [],
         setMode: (m) => { setMode(m); setCfg((c) => ({ ...c, autoApprove: m === "bypass" })); },
         reloadPlugins: () => {

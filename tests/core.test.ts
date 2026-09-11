@@ -355,6 +355,39 @@ describe("pricing", () => {
   });
 });
 
+// ---------- rewind ----------
+describe("rewind", () => {
+  test("rewindTo restores files and drops checkpoints", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-rewind-"));
+    const file = join(root, "a.txt");
+    writeFileSync(file, "v1", "utf8");
+    const t = new ToolKit(root, { autoApprove: true });
+    t.beginCheckpoint();                       // turn 1
+    await t.dispatch("write", { path: "a.txt", content: "v2" });
+    t.beginCheckpoint();                       // turn 2
+    await t.dispatch("write", { path: "a.txt", content: "v3" });
+    expect(readFileSync(file, "utf8")).toBe("v3");
+    const res = t.rewindTo(1);                 // back to start of turn 2
+    expect(res).toEqual({ files: 1 });
+    expect(readFileSync(file, "utf8")).toBe("v2");
+    expect(t.rewindTo(0)).toEqual({ files: 1 });
+    expect(readFileSync(file, "utf8")).toBe("v1");
+    expect(t.rewindTo(99)).toBeNull();         // out of range
+  });
+
+  test("turnMarks persist through save/load", async () => {
+    const { Session } = await import("../src/session.ts");
+    const s = Session.new(mkdtempSync(join(tmpdir(), "goat-rw-")), "mock/m");
+    s.turnMarks = [0, 4, 9];
+    s.append({ role: "user", content: "hi" } as any);
+    s.save();
+    const s2 = new Session({ id: s.id, cwd: s.cwd, model: s.model });
+    s2.load();
+    expect(s2.turnMarks).toEqual([0, 4, 9]);
+  });
+});
+
 // ---------- context windows ----------
 describe("context windows", () => {
   test("window map + true meter", async () => {
@@ -1151,6 +1184,7 @@ describe("compact command", () => {
       cfg: { model: "mock/m", maxTokens: 8192, autoApprove: false } as any,
       setCfg: () => {}, registry: null as any, setSession: () => {}, saveCfg: () => {},
       exit: () => {}, mcp: null, skills: [], undoTurn: () => 0, backgroundTasks: () => [],
+      rewindTurn: () => null,
       setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub", reloadPlugins: () => 0,
       clearAuthBanner: () => {},
     };

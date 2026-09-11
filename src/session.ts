@@ -14,6 +14,8 @@ export interface SessionData {
   title: string;
   createdAt: number;
   usage: { in: number; out: number; cacheRead?: number; cacheWrite?: number };
+  /** Message-count at the start of each user turn (for /rewind). */
+  turnMarks?: number[];
   messages: Message[];
   compactedFrom: number;
   /** Model-written (or digest-fallback) summary of everything before compactedFrom. */
@@ -44,6 +46,8 @@ export class Session {
   compactedFrom = 0;
   usage: { in: number; out: number; cacheRead?: number; cacheWrite?: number } = { in: 0, out: 0 };
   digest = "";
+  /** Message-count at the start of each user turn (drives /rewind). */
+  turnMarks: number[] = [];
 
   constructor(init: Partial<SessionData> & { id: string; cwd: string; model: string }) {
     this.id = init.id;
@@ -56,6 +60,7 @@ export class Session {
     const u = init.usage ?? { in: 0, out: 0 };
     this.usage = { in: u.in ?? 0, out: u.out ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0 };
     this.digest = init.digest ?? "";
+    this.turnMarks = Array.isArray(init.turnMarks) ? init.turnMarks : [];
   }
 
   static new(cwd: string, model: string): Session {
@@ -82,6 +87,7 @@ export class Session {
         meta: true, id: this.id, cwd: this.cwd, model: this.model,
         title: this.title, createdAt: this.createdAt,
         compactedFrom: this.compactedFrom, usage: this.usage, digest: this.digest,
+        turnMarks: this.turnMarks,
       }),
       ...this.messages.map((m) => JSON.stringify(m)),
     ];
@@ -97,8 +103,9 @@ export class Session {
       if (obj.meta) {
         this.cwd = obj.cwd; this.model = obj.model; this.title = obj.title ?? "";
         this.createdAt = obj.createdAt; this.compactedFrom = obj.compactedFrom ?? 0;
-        this.usage = obj.usage ?? { in: 0, out: 0 };
+        this.usage = { cacheRead: 0, cacheWrite: 0, ...(obj.usage ?? {}) };
         this.digest = obj.digest ?? "";
+        this.turnMarks = Array.isArray(obj.turnMarks) ? obj.turnMarks : [];
       } else {
         msgs.push(obj as Message);
       }
@@ -132,6 +139,8 @@ export interface SessionSummary {
   cwd: string;
   createdAt: number;   // unix seconds
   usage: { in: number; out: number; cacheRead?: number; cacheWrite?: number };
+  /** Message-count at the start of each user turn (for /rewind). */
+  turnMarks?: number[];
 }
 
 /** Every stored session's meta line — feeds the cost dashboard. */
@@ -146,6 +155,7 @@ export function allSessions(): SessionSummary[] {
         id: meta.id, model: meta.model ?? "", title: meta.title ?? "",
         cwd: meta.cwd ?? "", createdAt: meta.createdAt ?? 0,
         usage: { cacheRead: 0, cacheWrite: 0, ...(meta.usage ?? {}) },
+        turnMarks: Array.isArray(meta.turnMarks) ? meta.turnMarks : [],
       });
     } catch { /* skip corrupt */ }
   }

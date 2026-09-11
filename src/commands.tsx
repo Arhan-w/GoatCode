@@ -22,7 +22,7 @@ export const SLASH_COMMANDS = [
   "/help", "/model", "/models", "/providers", "/auth", "/logout",
   "/new", "/clear", "/compact", "/sessions", "/resume", "/rename", "/export",
   "/mcp", "/skills", "/plugin", "/cost", "/usage", "/context", "/config",
-  "/status", "/memory", "/doctor", "/init", "/review", "/undo", "/tasks", "/quit",
+  "/status", "/memory", "/doctor", "/init", "/review", "/undo", "/rewind", "/tasks", "/quit",
 ];
 
 export interface SlashIO {
@@ -38,6 +38,8 @@ export interface SlashIO {
   skills: SkillDef[];
   /** Revert the last turn's file mutations; null = no toolkit yet. */
   undoTurn(): number | null;
+  /** Rewind transcript + files to the start of turn n (1-based). null = unavailable. */
+  rewindTurn(n: number): { files: number; msgs: number } | null;
   backgroundTasks(): { id: string; cmd: string; status: string; started: number }[];
   setMode(mode: "default" | "acceptEdits" | "plan" | "bypass"): void;
   runTurn(text: string | import("./llm.ts").ContentPart[]): Promise<void>;
@@ -455,6 +457,37 @@ export function runSlash(line: string, io: SlashIO): boolean {
           ))}
         </Box>,
       );
+      return true;
+    }
+
+    case "/rewind": {
+      const marks = io.session.turnMarks;
+      if (!marks.length) { io.push(<Text dimColor color="#8a8a8a">  no rewindable turns yet (marks start with this release)</Text>); return true; }
+      const n = parseInt(arg, 10);
+      if (Number.isNaN(n)) {
+        // picker: last 10 turns with their first user line
+        const rows = marks.slice(-10).map((mark, i) => {
+          const idx = marks.length - Math.min(10, marks.length) + i;
+          const m = io.session.messages[mark];
+          const head = (m ? textOf(m.content) : "").replace(/\s+/g, " ").slice(0, 64);
+          return { idx, head };
+        });
+        io.push(
+          <Box flexDirection="column">
+            <Text>  rewind to which turn? (files + transcript restored)</Text>
+            {rows.map((r) => (
+              <Text key={r.idx}>
+                <Text color="#a855f7">  /rewind {r.idx + 1}</Text>
+                <Text dimColor color="#8a8a8a">  · {r.head || "(image turn)"}</Text>
+              </Text>
+            ))}
+          </Box>,
+        );
+        return true;
+      }
+      const res = io.rewindTurn(n);
+      if (!res) io.push(<Text color="#f87171">✗ turn {n} not available (1–{marks.length})</Text>);
+      else io.push(<Text color="#4ade80">✓ rewound to turn {n} — transcript back to {res.msgs} messages · {res.files} file mutation{res.files === 1 ? "" : "s"} restored</Text>);
       return true;
     }
 

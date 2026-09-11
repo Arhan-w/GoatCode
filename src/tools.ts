@@ -288,6 +288,22 @@ export class ToolKit {
     return n;
   }
 
+  /**
+   * Rewind to the checkpoint taken at turn `turnIndex` (0-based): revert every
+   * snapshot from that turn onward and drop the consumed checkpoints.
+   * Returns {files} restored, or null when the index is out of range.
+   */
+  rewindTo(turnIndex: number): { files: number } | null {
+    if (turnIndex < 0 || turnIndex > this.checkpoints.length) return null;
+    const boundary = this.checkpoints[turnIndex] ?? this.snaps.length;
+    let n = 0;
+    while (this.snaps.length > boundary) { this.undo(); n++; }
+    this.checkpoints.length = turnIndex;
+    return { files: n };
+  }
+
+  get turnCount(): number { return this.checkpoints.length; }
+
   undoAll(): SnapRecord[] {
     const out: SnapRecord[] = [];
     while (this.snaps.length) out.push(this.undo()!);
