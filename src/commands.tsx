@@ -10,7 +10,7 @@ import { appDir, configPath, saveConfig, splitModel, MODEL_ALIASES } from "./con
 import type { ProviderRegistry } from "./providers.ts";
 import { CredentialStore, OAUTH_PROVIDERS, type Credential } from "./providers.ts";
 import { Session, listSessions, allSessions } from "./session.ts";
-import { costUsd, fmtUsd } from "./pricing.ts";
+import { cacheSavings, costUsd, fmtUsd } from "./pricing.ts";
 import { contentChars, estimateTokens, textOf } from "./llm.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
@@ -274,11 +274,14 @@ export function runSlash(line: string, io: SlashIO): boolean {
       const u = io.session.usage;
       const est = io.session.messages.reduce((s, m) => s + estimateTokens(m.content), 0);
       io.push(<Text>  session: {io.session.messages.length} messages · {u.in} in / {u.out} out tokens{u.in ? "" : " (no usage reported yet)"} · est context ~{est} · model {io.cfg.model}</Text>);
-      const cost = costUsd(io.cfg.model, u.in, u.out);
+      const cost = costUsd(io.cfg.model, u);
       if (cost != null)
         io.push(<Text color="#4ade80">  ≈ {fmtUsd(cost)} this session ({io.cfg.model} rates, live)</Text>);
       else
         io.push(<Text dimColor color="#8a8a8a">  no price known for {io.cfg.model} — tokens still counted above</Text>);
+      const saved = cacheSavings(io.cfg.model, u);
+      if (saved != null)
+        io.push(<Text color="#a855f7">  ⚡ prompt cache: {(u.cacheRead ?? 0).toLocaleString()} tok read — saved ~{fmtUsd(saved)}</Text>);
       return true;
     }
 
@@ -381,7 +384,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
         const byDay = new Map<string, { in: number; out: number; cost: number; n: number }>();
         let tin = 0, tout = 0, tcost = 0, unknownCost = false;
         for (const s of all) {
-          const c = costUsd(s.model, s.usage.in, s.usage.out);
+          const c = costUsd(s.model, s.usage);
           if (c == null) unknownCost = true;
           for (const [key, bucket] of [
             [s.model || "(none)", byModel],

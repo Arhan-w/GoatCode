@@ -26,7 +26,7 @@ export type AgentEvent =
   | { kind: "thinking"; text: string }
   | { kind: "tool_start"; tool: string; args: Record<string, unknown> }
   | { kind: "tool_end"; tool: string; result: string; ok: boolean }
-  | { kind: "usage"; text: string; usage?: { prompt: number; completion: number } }
+  | { kind: "usage"; text: string; usage?: { prompt: number; completion: number; cacheRead?: number; cacheWrite?: number } }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
   | { kind: "retry"; attempt: number; waitMs: number; reason: string }
   | { kind: "fallback"; from: string; to: string; reason: string }
@@ -41,6 +41,8 @@ export const CONCURRENT_SAFE = new Set(["read", "glob", "grep", "tasks"]);
 
 export interface AgentDeps {
   client: ChatClient;
+  /** Anthropic prompt caching (system+tools ephemeral cache). */
+  cache?: boolean;
   /** Cheaper client for background work (compaction, explore subagents). */
   smallClient?: ChatClient;
   session: Session;
@@ -76,6 +78,7 @@ export class Agent {
   requestTimeoutMs: number;
   disallowedTools: Set<string>;
   fallbacks: Array<{ client: ChatClient; model: string }>;
+  cache: boolean;
 
   constructor(deps: AgentDeps) {
     this.client = deps.client;
@@ -91,6 +94,7 @@ export class Agent {
     this.requestTimeoutMs = deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
     this.disallowedTools = deps.disallowedTools ?? new Set();
     this.fallbacks = deps.fallbacks ? [...deps.fallbacks] : [];
+    this.cache = deps.cache ?? false;
   }
 
   private messages(): Message[] {
@@ -290,13 +294,15 @@ export class Agent {
     client?: ChatClient, model?: string): AsyncGenerator<AgentEvent> {
     for await (const ev of (client ?? this.client).streamChat(
       this.messages(), specs ?? this.tools.specs(),
-      { model: modelId(model ?? this.session.model), maxTokens: this.maxTokens, temperature: this.temperature, signal },
+      { model: modelId(model ?? this.session.model), maxTokens: this.maxTokens, temperature: this.temperature, signal, cache: this.cache },
     )) {
       if (ev.textDelta) yield { kind: "text", text: ev.textDelta };
       else if (ev.thinkingDelta) yield { kind: "thinking", text: ev.thinkingDelta };
       else if (ev.usage) {
         this.session.usage.in += ev.usage.prompt;
         this.session.usage.out += ev.usage.completion;
+        if (ev.usage.cacheRead) this.session.usage.cacheRead = (this.session.usage.cacheRead ?? 0) + ev.usage.cacheRead;
+        if (ev.usage.cacheWrite) this.session.usage.cacheWrite = (this.session.usage.cacheWrite ?? 0) + ev.usage.cacheWrite;
         yield { kind: "usage", text: `${ev.usage.prompt}+${ev.usage.completion} tok`, usage: ev.usage };
       }
       else if (ev.toolCalls) yield { kind: "tool_calls", toolCalls: ev.toolCalls };

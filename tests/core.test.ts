@@ -342,6 +342,36 @@ describe("pricing", () => {
     expect(costUsd("deepseek/deepseek-chat", 10_000, 1_000)).toBeCloseTo(0.0037);
     expect(costUsd("freellmapi/auto", 1000, 1000)).toBeNull();
   });
+
+  test("costUsd prices cache reads at 0.1x and writes at 1.25x", async () => {
+    const { costUsd, cacheSavings } = await import("../src/pricing.ts");
+    // sonnet: in $3/M. 1M fresh + 1M cacheRead + 1M cacheWrite + 0 out = 3 + 0.3 + 3.75
+    const u = { in: 1_000_000, out: 0, cacheRead: 1_000_000, cacheWrite: 1_000_000 };
+    expect(costUsd("anthropic/claude-sonnet-4-5", u)).toBeCloseTo(7.05);
+    expect(cacheSavings("anthropic/claude-sonnet-4-5", u)).toBeCloseTo(2.7);
+    expect(cacheSavings("anthropic/claude-sonnet-4-5", { in: 5, out: 5 })).toBeNull();
+    // legacy positional shape still works
+    expect(costUsd("anthropic/claude-sonnet-4-5", 1_000_000, 0)).toBeCloseTo(3);
+  });
+});
+
+// ---------- prompt caching ----------
+describe("prompt caching", () => {
+  test("anthropic payload: cache=true wraps system+last tool with cache_control", async () => {
+    const { AnthropicClient } = await import("../src/llm.ts");
+    const tools = [
+      { name: "read", description: "r", parameters: { type: "object" } },
+      { name: "bash", description: "b", parameters: { type: "object" } },
+    ];
+    const on = AnthropicClient.buildPayload("SYS", [], tools, { model: "m", maxTokens: 8, cache: true });
+    expect(Array.isArray(on.system)).toBe(true);
+    expect(on.system[0].cache_control).toEqual({ type: "ephemeral" });
+    expect(on.tools[0].cache_control).toBeUndefined();
+    expect(on.tools[1].cache_control).toEqual({ type: "ephemeral" });
+    const off = AnthropicClient.buildPayload("SYS", [], tools, { model: "m", maxTokens: 8 });
+    expect(off.system).toBe("SYS"); // byte-identical legacy shape
+    expect(off.tools[1].cache_control).toBeUndefined();
+  });
 });
 
 // ---------- plugins ----------

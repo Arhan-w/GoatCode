@@ -286,6 +286,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         maxTokens: cfgRef.current.maxTokens, temperature: cfgRef.current.temperature,
         maxSteps: cfgRef.current.maxSteps,
         fallbacks,
+        cache: cfgRef.current.cachePrompts,
         extraSystem: [buildExtraSystem(skills, sessionRef.current.cwd),
           loadOutputStyle(cfgRef.current.outputStyle)].filter(Boolean).join("\n\n"),
       });

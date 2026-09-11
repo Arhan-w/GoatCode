@@ -376,6 +376,7 @@ async function main(): Promise<number> {
       fallbacks: await resolveFallbacks(cfg, registry),
       session, tools,
       maxTokens: cfg.maxTokens, temperature: cfg.temperature, maxSteps: cfg.maxSteps,
+      cache: cfg.cachePrompts,
       extraSystem: [buildExtraSystem(allSkills(cfg), process.cwd()),
         loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
     });
@@ -392,7 +393,7 @@ async function main(): Promise<number> {
     session.save();
     if (json) {
       // session.model tracks a mid-turn failover — report the model that answered
-      const cost = costUsd(session.model, session.usage.in, session.usage.out);
+      const cost = costUsd(session.model, session.usage);
       process.stdout.write(JSON.stringify({
         type: "result",
         subtype: failed ? "error" : "success",

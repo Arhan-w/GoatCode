@@ -13,7 +13,7 @@ export interface SessionData {
   model: string;
   title: string;
   createdAt: number;
-  usage: { in: number; out: number };
+  usage: { in: number; out: number; cacheRead?: number; cacheWrite?: number };
   messages: Message[];
   compactedFrom: number;
   /** Model-written (or digest-fallback) summary of everything before compactedFrom. */
@@ -42,7 +42,7 @@ export class Session {
   createdAt: number;
   messages: Message[] = [];
   compactedFrom = 0;
-  usage = { in: 0, out: 0 };
+  usage: { in: number; out: number; cacheRead?: number; cacheWrite?: number } = { in: 0, out: 0 };
   digest = "";
 
   constructor(init: Partial<SessionData> & { id: string; cwd: string; model: string }) {
@@ -53,7 +53,8 @@ export class Session {
     this.createdAt = init.createdAt ?? Date.now() / 1000;
     this.messages = init.messages ?? [];
     this.compactedFrom = init.compactedFrom ?? 0;
-    this.usage = init.usage ?? { in: 0, out: 0 };
+    const u = init.usage ?? { in: 0, out: 0 };
+    this.usage = { in: u.in ?? 0, out: u.out ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0 };
     this.digest = init.digest ?? "";
   }
 
@@ -130,7 +131,7 @@ export interface SessionSummary {
   title: string;
   cwd: string;
   createdAt: number;   // unix seconds
-  usage: { in: number; out: number };
+  usage: { in: number; out: number; cacheRead?: number; cacheWrite?: number };
 }
 
 /** Every stored session's meta line — feeds the cost dashboard. */
@@ -144,7 +145,7 @@ export function allSessions(): SessionSummary[] {
       if (meta.meta) out.push({
         id: meta.id, model: meta.model ?? "", title: meta.title ?? "",
         cwd: meta.cwd ?? "", createdAt: meta.createdAt ?? 0,
-        usage: meta.usage ?? { in: 0, out: 0 },
+        usage: { cacheRead: 0, cacheWrite: 0, ...(meta.usage ?? {}) },
       });
     } catch { /* skip corrupt */ }
   }

@@ -58,6 +58,9 @@ export interface GoatConfig {
   statusLine?: { command: string };
   /** Cheap model routed to for background work (compaction, subagents). */
   smallModel?: string;
+  /** Anthropic prompt caching: system+tools cached between turns (90% off on
+   *  cache hits). Ignored by non-Anthropic wire formats. Default on. */
+  cachePrompts: boolean;
   /** Output style name or path to a .md file appended to the system prompt. */
   outputStyle?: string;
   /** Models tried in order when the primary provider hard-fails (quota/auth/down). */
@@ -141,6 +144,7 @@ export function loadConfig(projectDir: string = process.cwd()): GoatConfig {
     temperature: data.temperature ?? null,
     autoApprove: Boolean(data.auto_approve ?? data.autoApprove ?? false),
     maxSteps: Number(data.max_steps ?? data.maxSteps ?? 40),
+    cachePrompts: data.cache_prompts ?? data.cachePrompts ?? true,
     endpoints: {},
     mcpServers: { ...(data.mcpServers ?? {}) },
     pluginDirs: Array.isArray(data.plugins) ? data.plugins : [],
@@ -206,6 +210,7 @@ export function saveConfig(cfg: GoatConfig): void {
     model: cfg.model,
     max_tokens: cfg.maxTokens,
     max_steps: cfg.maxSteps,
+    cache_prompts: cfg.cachePrompts,
     auto_approve: cfg.autoApprove,
     endpoints: Object.fromEntries(
       Object.entries(cfg.endpoints).map(([pid, ep]) => [

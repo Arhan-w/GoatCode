@@ -86,7 +86,7 @@ export interface StreamEvent {
   textDelta?: string;
   thinkingDelta?: string;
   toolCalls?: ToolCall[];
-  usage?: { prompt: number; completion: number };
+  usage?: { prompt: number; completion: number; cacheRead?: number; cacheWrite?: number };
   error?: string;
 }
 
@@ -130,6 +130,8 @@ export interface StreamOpts {
   maxTokens: number;
   temperature?: number | null;
   signal?: AbortSignal;
+  /** Anthropic prompt caching: cache system+tools (ephemeral). Ignored by other formats. */
+  cache?: boolean;
 }
 
 export interface ChatClient {
@@ -338,25 +340,51 @@ export class AnthropicClient implements ChatClient {
     return { system, msgs };
   }
 
-  async *streamChat(messages: Message[], tools: ToolSpec[], opts: StreamOpts): AsyncGenerator<StreamEvent> {
-    const { system, msgs } = AnthropicClient.systemAndMessages(messages);
+  /** Build the /messages request body. Static + pure so tests can assert
+   *  the prompt-caching shape without a network. */
+  static buildPayload(system: string, msgs: any[], tools: ToolSpec[], opts: StreamOpts): any {
     const payload: any = {
       model: opts.model, max_tokens: opts.maxTokens, stream: true, messages: msgs,
     };
-    if (system) payload.system = system;
+    if (system) {
+      payload.system = opts.cache
+        ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
+        : system;
+    }
     if (opts.temperature != null) payload.temperature = opts.temperature;
-    if (tools.length)
-      payload.tools = tools.map((t) => ({
+    if (tools.length) {
+      const list: any[] = tools.map((t) => ({
         name: t.name, description: t.description, input_schema: t.parameters,
       }));
+      // cache_control on the LAST tool marks the whole tools block cacheable
+      if (opts.cache) list[list.length - 1].cache_control = { type: "ephemeral" };
+      payload.tools = list;
+    }
+    return payload;
+  }
+
+  async *streamChat(messages: Message[], tools: ToolSpec[], opts: StreamOpts): AsyncGenerator<StreamEvent> {
+    const { system, msgs } = AnthropicClient.systemAndMessages(messages);
+    const payload = AnthropicClient.buildPayload(system, msgs, tools, opts);
 
     const res = await postJson(`${this.baseUrl}/messages`, this.headers(), payload, opts.signal);
     const toolBuf = new Map<number, { id: string; name: string; json: string }>();
+    const cacheTok = { read: 0, write: 0 };
     let blockType = "";
     for await (const data of sseLines(res)) {
       const obj = safeParse(data);
       if (!obj) continue;
       switch (obj.type) {
+        case "message_start": {
+          // cache token counts ride on message_start usage; merge them into the
+          // single authoritative usage event at message_delta (never double-yield)
+          const u = obj.message?.usage;
+          if (u) {
+            cacheTok.read = u.cache_read_input_tokens ?? 0;
+            cacheTok.write = u.cache_creation_input_tokens ?? 0;
+          }
+          break;
+        }
         case "content_block_start":
           blockType = obj.content_block?.type ?? "";
           if (blockType === "tool_use")
@@ -375,6 +403,9 @@ export class AnthropicClient implements ChatClient {
             yield { usage: {
               prompt: obj.usage.input_tokens ?? 0,
               completion: obj.usage.output_tokens ?? 0,
+              ...(cacheTok.read || cacheTok.write
+                ? { cacheRead: cacheTok.read, cacheWrite: cacheTok.write }
+                : {}),
             } };
           break;
         case "message_stop": {

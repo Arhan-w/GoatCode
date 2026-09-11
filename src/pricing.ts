@@ -44,10 +44,33 @@ export function priceFor(model: string): Price | null {
 }
 
 /** Estimated USD spend for token counts, e.g. costUsd("anthropic/claude-sonnet-4-5", 120000, 3400). */
-export function costUsd(model: string, inTok: number, outTok: number): number | null {
+export interface TokenUsage {
+  in: number; out: number; cacheRead?: number; cacheWrite?: number;
+}
+
+/**
+ * Estimated USD spend. Anthropic bills cache reads at 0.1x and cache writes at
+ * 1.25x the input price; `inTok` from the API EXCLUDES cached tokens, so the
+ * cache blocks are priced on top. Legacy (in, out) call shape still works.
+ */
+export function costUsd(model: string, inTok: number | TokenUsage, outTok?: number): number | null {
   const p = priceFor(model);
   if (!p) return null;
-  return (inTok / 1_000_000) * p.in + (outTok / 1_000_000) * p.out;
+  const u: TokenUsage = typeof inTok === "number"
+    ? { in: inTok, out: outTok ?? 0 }
+    : inTok;
+  const M = 1_000_000;
+  return (u.in / M) * p.in
+    + ((u.cacheRead ?? 0) / M) * p.in * 0.1
+    + ((u.cacheWrite ?? 0) / M) * p.in * 1.25
+    + (u.out / M) * p.out;
+}
+
+/** USD saved by cache hits vs uncached input price (0 when nothing cached). */
+export function cacheSavings(model: string, u: TokenUsage): number | null {
+  const p = priceFor(model);
+  if (!p || !u.cacheRead) return null;
+  return (u.cacheRead / 1_000_000) * p.in * 0.9;
 }
 
 export function fmtUsd(n: number): string {
