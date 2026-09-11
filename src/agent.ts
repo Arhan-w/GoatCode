@@ -165,6 +165,20 @@ export class Agent {
       const results = new Map<ToolCall, ToolResult>();
       let i = 0;
       while (i < toolCalls.length) {
+        // Parallel subagents: consecutive `task` calls fan out (cap 3) — each
+        // gets a fresh context, so they're independent by construction.
+        // Permission prompts from inside them are serialized by the TUI queue.
+        if (toolCalls[i].name === "task" && !this.disallowedTools.has("task")) {
+          const batch: ToolCall[] = [];
+          while (i < toolCalls.length && toolCalls[i].name === "task" && batch.length < 3)
+            batch.push(toolCalls[i++]);
+          for (const c of batch)
+            yield { kind: "tool_start", tool: "task", args: c.arguments };
+          const settled = await Promise.all(
+            batch.map((c) => this.spawnSubagent(c.arguments, signal)));
+          batch.forEach((c, k) => results.set(c, settled[k]));
+          continue;
+        }
         if (CONCURRENT_SAFE.has(toolCalls[i].name) && !this.disallowedTools.has(toolCalls[i].name)) {
           const batch: ToolCall[] = [];
           while (i < toolCalls.length && CONCURRENT_SAFE.has(toolCalls[i].name)) batch.push(toolCalls[i++]);

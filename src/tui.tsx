@@ -175,6 +175,9 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [tokens, setTokens] = useState(0);
   const [ctxTok, setCtxTok] = useState(0); // real prompt tokens of the last API call
   const [perm, setPerm] = useState<PermRequest | null>(null);
+  const toolQueueOpen = useRef(false);
+  /** Tools the user chose "always allow (session)" for — in memory only. */
+  const sessionRules = useRef<Set<string>>(new Set());
   const [permSel, setPermSel] = useState(0);
   const [completions, setCompletions] = useState<string[]>([]);
   const [compSel, setCompSel] = useState(0);
@@ -253,11 +256,23 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     return () => clearInterval(id);
   }, [thinking]);
 
+  // Permission queue: parallel subagents can ask simultaneously; one dialog
+  // at a time, FIFO, so no resolver is ever dropped (a lost resolver = deadlock).
+  const permQueue = useRef<PermRequest[]>([]);
   const askPermission = useCallback((tool: string, args: Record<string, unknown>): Promise<boolean> => {
     return new Promise((res) => {
-      setPerm({ tool, args, resolve: res });
+      const req = { tool, args, resolve: res };
+      if (toolQueueOpen.current) { permQueue.current.push(req); return; }
+      toolQueueOpen.current = true;
+      setPerm(req);
       setPermSel(0);
     });
+  }, []);
+  const nextPerm = useCallback(() => {
+    const nxt = permQueue.current.shift() ?? null;
+    if (!nxt) toolQueueOpen.current = false;
+    else setPerm(nxt);
+    setPermSel(0);
   }, []);
 
   const buildAgent = useCallback(async (): Promise<Agent | null> => {
@@ -278,7 +293,9 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       tools.sessionId = sessionRef.current.id;
       // acceptEdits auto-approves file edits, still asks for bash (Claude semantics)
       tools.permission = (t, a) =>
-        m === "acceptEdits" && (t === "write" || t === "edit") ? true : askPermission(t, a);
+        m === "acceptEdits" && (t === "write" || t === "edit") ? true
+        : sessionRules.current.has(t) ? true
+        : askPermission(t, a);
       if (mcp)
         for (const spec of mcp.specs())
           tools.registerExternal({ spec, run: (args) => mcp.dispatch(spec.name, args) });
@@ -533,6 +550,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         saveCfg: saveConfig, push, exit, mcp, skills,
         clearAuthBanner: () => setAuthBanner(null),
         undoTurn: () => toolsRef.current ? toolsRef.current.undoCheckpoint() : null,
+        sessionRules: () => [...sessionRules.current],
         rewindTurn: (n) => {
           const t = toolsRef.current;
           const s = sessionRef.current;
@@ -590,12 +608,18 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       if (k.upArrow) setPermSel((s) => (s + 2) % 3);
       else if (k.downArrow) setPermSel((s) => (s + 1) % 3);
       else if (k.return) {
-        if (permSel === 1) setMode("acceptEdits"); // "yes, allow all this session"
+        if (permSel === 1) {
+          // "yes, allow all this session" -> remember a rule for this tool
+          sessionRules.current.add(perm.tool);
+          if (perm.tool === "write" || perm.tool === "edit") setMode("acceptEdits");
+        }
         perm.resolve(permSel < 2);
         setPerm(null);
+        nextPerm();
       } else if (k.escape || ch === "n") {
         perm.resolve(false);
         setPerm(null);
+        nextPerm();
       }
       return;
     }
@@ -853,7 +877,7 @@ function PermDialog({ req, sel }: { req: PermRequest; sel: number }) {
   const detail = String(a.command ?? a.path ?? JSON.stringify(a)).slice(0, 200);
   const opts = [
     "Yes",
-    "Yes, and allow all edits this session",
+    `Yes, and always allow ${req.tool} this session`,
     "No, and tell GoatCode what to do differently",
   ];
   return (

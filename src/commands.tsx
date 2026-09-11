@@ -22,7 +22,7 @@ export const SLASH_COMMANDS = [
   "/help", "/model", "/models", "/providers", "/auth", "/logout",
   "/new", "/clear", "/compact", "/sessions", "/resume", "/rename", "/export",
   "/mcp", "/skills", "/plugin", "/cost", "/usage", "/context", "/config",
-  "/status", "/memory", "/doctor", "/init", "/review", "/undo", "/rewind", "/tasks", "/quit",
+  "/status", "/memory", "/doctor", "/init", "/review", "/undo", "/rewind", "/permissions", "/tasks", "/quit",
 ];
 
 export interface SlashIO {
@@ -40,6 +40,8 @@ export interface SlashIO {
   undoTurn(): number | null;
   /** Rewind transcript + files to the start of turn n (1-based). null = unavailable. */
   rewindTurn(n: number): { files: number; msgs: number } | null;
+  /** Tools the user always-allowed for this session (memory only). */
+  sessionRules(): string[];
   backgroundTasks(): { id: string; cmd: string; status: string; started: number }[];
   setMode(mode: "default" | "acceptEdits" | "plan" | "bypass"): void;
   runTurn(text: string | import("./llm.ts").ContentPart[]): Promise<void>;
@@ -455,6 +457,18 @@ export function runSlash(line: string, io: SlashIO): boolean {
               <Text dimColor color="#8a8a8a">{text.split("\n").slice(-12).map((l) => "    " + l).join("\n")}</Text>
             </Box>
           ))}
+        </Box>,
+      );
+      return true;
+    }
+
+    case "/permissions": {
+      const rules = io.sessionRules();
+      if (!rules.length) io.push(<Text dimColor color="#8a8a8a">  no session rules — pick "always allow" on any prompt to add one (memory only, never saved)</Text>);
+      else io.push(
+        <Box flexDirection="column">
+          <Text>  always-allowed this session:</Text>
+          {rules.map((r) => <Text key={r} color="#4ade80">    ✓ {r}</Text>)}
         </Box>,
       );
       return true;

@@ -1184,7 +1184,7 @@ describe("compact command", () => {
       cfg: { model: "mock/m", maxTokens: 8192, autoApprove: false } as any,
       setCfg: () => {}, registry: null as any, setSession: () => {}, saveCfg: () => {},
       exit: () => {}, mcp: null, skills: [], undoTurn: () => 0, backgroundTasks: () => [],
-      rewindTurn: () => null,
+      rewindTurn: () => null, sessionRules: () => [],
       setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub", reloadPlugins: () => 0,
       clearAuthBanner: () => {},
     };
