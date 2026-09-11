@@ -8,6 +8,8 @@ Rules:
 - Keep bash commands non-interactive. Quote paths with spaces.
 - When done, give a 1-3 line summary: what changed, what to verify.
 - If the task is ambiguous and risky (deletes, pushes, money), ask first.
+- Research across several independent areas: issue MULTIPLE task calls in one
+  message — they run in parallel (up to 3 at a time) and each returns a report.
 - Multi-step work (3+ steps): track it with the todo tool. Mark a task in_progress
   BEFORE starting and completed IMMEDIATELY after — never batch completions, keep
   exactly one in_progress, and send the full list on every update. Skip todos for

@@ -813,6 +813,48 @@ describe("subagents", () => {
     expect(text).toContain("parent done");
   });
 
+  test("two task calls in one message run in parallel", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    let parentCalls = 0;
+    const active: number[] = [];
+    let maxConcurrent = 0;
+    const client = {
+      async *streamChat(msgs: any[]) {
+        const isChild = msgs.some((m: any) => String(m.content).includes("SUBTASK"));
+        if (!isChild) {
+          parentCalls++;
+          if (parentCalls === 1)
+            yield { toolCalls: [
+              { id: "a", name: "task", arguments: { description: "x", prompt: "SUBTASK: a", subagent_type: "explore" } },
+              { id: "b", name: "task", arguments: { description: "y", prompt: "SUBTASK: b", subagent_type: "explore" } },
+            ] };
+          else yield { textDelta: "merged" };
+        } else {
+          active.push(Date.now());
+          maxConcurrent = Math.max(maxConcurrent, active.length);
+          await new Promise((r) => setTimeout(r, 60));
+          active.pop();
+          yield { textDelta: "report-" + String(msgs.at(-1)?.content).slice(-1) };
+        }
+      },
+    } as any;
+    const session = Session.new(home, "mock/m");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 6,
+    });
+    let text = "";
+    for await (const ev of agent.runTurn("go")) if (ev.kind === "text") text += ev.text;
+    expect(maxConcurrent).toBe(2); // overlapped, not sequential
+    expect(text).toContain("merged");
+    const toolMsgs = session.messages.filter((m) => m.role === "tool" && m.name === "task");
+    expect(toolMsgs.length).toBe(2);
+    expect(String(toolMsgs[0].content)).toContain("report-");
+    expect(String(toolMsgs[1].content)).toContain("report-");
+  });
+
   test("sub-agents cannot spawn sub-agents", async () => {
     const { Agent } = await import("../src/agent.ts");
     const { Session } = await import("../src/session.ts");
