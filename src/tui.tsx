@@ -17,6 +17,7 @@ import { Agent, type AgentEvent } from "./agent.ts";
 import { COMMAND_DESC, SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
 import { appDir, loadConfig, saveConfig, splitModel, type GoatConfig } from "./config.ts";
 import { contextPct } from "./window.ts";
+import { unifiedDiff, diffStats } from "./diff.ts";
 import { ProviderRegistry } from "./providers.ts";
 import { resolveSmall, resolveFallbacks, ResolveError, resolve } from "./runtime.ts";
 import { Session } from "./session.ts";
@@ -380,6 +381,14 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
                 <Text dimColor color={DIM}>  {first}</Text>
               </Text>,
             );
+            // inline unified diff after file mutations (from the undo snapshot)
+            if (ev.ok && (ev.tool === "edit" || ev.tool === "write")) {
+              const snap = agent.tools.lastSnap();
+              if (snap) {
+                const lines = unifiedDiff(snap.before, snap.after);
+                if (lines.length) push(<DiffView path={snap.path} lines={lines} />);
+              }
+            }
             break;
           }
           case "usage": {
@@ -826,6 +835,23 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
 }
 
 // ---------- sub-components ----------
+
+/** Colored unified diff block, capped at 12 rows (Static history — safe). */
+function DiffView({ path, lines }: { path: string; lines: string[] }) {
+  const { added, removed } = diffStats(lines);
+  const shown = lines.slice(0, 12);
+  return (
+    <Box flexDirection="column" paddingLeft={2}>
+      <Text dimColor color={DIM}>{"  "}{shortPath(path)}  <Text color={GREEN}>+{added}</Text><Text color={RED}> -{removed}</Text></Text>
+      {shown.map((l, i) => (
+        <Text key={i} color={l[0] === "+" ? GREEN : l[0] === "-" ? RED : DIM}>
+          {l.slice(0, 140)}
+        </Text>
+      ))}
+      {lines.length > 12 && <Text dimColor color={DIM}>  … {lines.length - 12} more rows</Text>}
+    </Box>
+  );
+}
 
 function PlanPanel({ todos }: { todos: Todo[] }) {
   const done = todos.filter((t) => t.status === "completed").length;

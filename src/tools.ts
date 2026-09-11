@@ -304,6 +304,13 @@ export class ToolKit {
 
   get turnCount(): number { return this.checkpoints.length; }
 
+  /** Newest snapshot taken since the last beginCheckpoint() — the diff source
+   *  for the inline edit/write preview. Null when nothing was snapshotted. */
+  lastSnap(): SnapRecord | null {
+    const boundary = this.checkpoints.length ? this.checkpoints[this.checkpoints.length - 1] : 0;
+    return this.snaps.length > boundary ? this.snaps[this.snaps.length - 1] : null;
+  }
+
   undoAll(): SnapRecord[] {
     const out: SnapRecord[] = [];
     while (this.snaps.length) out.push(this.undo()!);

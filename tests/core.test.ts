@@ -355,6 +355,39 @@ describe("pricing", () => {
   });
 });
 
+// ---------- diff ----------
+describe("diff", () => {
+  test("unifiedDiff marks adds/removes/context and stats", async () => {
+    const { unifiedDiff, diffStats } = await import("../src/diff.ts");
+    expect(unifiedDiff("same", "same")).toEqual([]);
+    const d = unifiedDiff("a\nb\nc", "a\nB\nc");
+    expect(d).toContain("-b");
+    expect(d).toContain("+B");
+    expect(d).toContain(" a");
+    expect(diffStats(d)).toEqual({ added: 1, removed: 1 });
+    // new file: everything is +
+    const nf = unifiedDiff("", "x\ny");
+    expect(nf.filter((l) => l[0] === "+").length).toBe(2);
+  });
+
+  test("lastSnap returns newest snapshot of the current turn only", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-diff-"));
+    const t = new ToolKit(root, { autoApprove: true });
+    expect(t.lastSnap()).toBeNull();
+    t.beginCheckpoint();
+    await t.dispatch("write", { path: "f.txt", content: "one" });
+    const s1 = t.lastSnap();
+    expect(s1).not.toBeNull();
+    expect(s1!.before).toBe("");
+    expect(s1!.after).toBe("one");
+    await t.dispatch("edit", { path: "f.txt", old_string: "one", new_string: "two" });
+    expect(t.lastSnap()!.before).toBe("one"); // newest wins
+    t.beginCheckpoint(); // next turn — previous snaps are out of scope
+    expect(t.lastSnap()).toBeNull();
+  });
+});
+
 // ---------- rewind ----------
 describe("rewind", () => {
   test("rewindTo restores files and drops checkpoints", async () => {
