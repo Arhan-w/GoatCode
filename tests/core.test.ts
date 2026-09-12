@@ -288,6 +288,41 @@ describe("workspace", () => {
     expect(extra).toContain("api: /tmp/api");
     expect(extra).toContain("ui: /tmp/ui");
   });
+
+  test("nested repos: glob/grep scan all roots but each file appears once", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const base = mkdtempSync(join(tmpdir(), "goat-ws-nest-"));
+    const api = join(base, "api"); // repo nested under the primary root
+    mkdirSync(join(api, "src"), { recursive: true });
+    writeFileSync(join(api, "src", "dup.ts"), "export const needle = 1;");
+    const tk = new ToolKit(base, { autoApprove: true, roots: { api } });
+    const g = tk.tool_glob({ pattern: "**/dup.ts" });
+    expect((g.output.match(/dup\.ts/g) ?? []).length).toBe(1);
+    const gr = tk.tool_grep({ pattern: "needle" });
+    expect(gr.output.split("\n").filter((l: string) => l.includes("needle")).length).toBe(1);
+    expect(gr.output).toContain("api/src/dup.ts:1:"); // repo-prefixed, not doubled
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  test("permission rules match repo-prefixed paths (deny cannot be dodged)", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const base = mkdtempSync(join(tmpdir(), "goat-ws-rule-"));
+    const api = join(base, "api");
+    mkdirSync(join(api, "src"), { recursive: true });
+    writeFileSync(join(api, "src", "a.ts"), "x");
+    const tk = new ToolKit(base, {
+      autoApprove: true, roots: { api },
+      rules: { allow: [], deny: ["Edit(src/**)"] },
+    });
+    // plain path and repo-prefixed path target the SAME file; both must deny
+    const direct = await tk.dispatch("edit", { path: "api/src/a.ts", old_string: "x", new_string: "y" });
+    expect(direct.ok).toBe(false);
+    expect(direct.output).toContain("denied by permission rule");
+    const viaRepo = await tk.dispatch("edit", { path: "src/a.ts", repo: "api", old_string: "x", new_string: "y" });
+    expect(viaRepo.ok).toBe(false);
+    expect(viaRepo.output).toContain("denied by permission rule");
+    rmSync(base, { recursive: true, force: true });
+  });
 });
 
 // ---------- llm ----------

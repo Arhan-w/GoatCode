@@ -67,10 +67,18 @@ export function ruleMatches(rule: Rule, tool: string, args: Record<string, unkno
     case "edit":
     case "write":
     case "read": {
-      const path = String(args.path ?? "").replaceAll("\\", "/");
+      // _rulePaths = every path form this call can touch (tool layer adds the
+      // resolved repo/display path). A rule matches if ANY form matches, so a
+      // repo-prefixed workspace path can't dodge Edit(src/**)-style rules.
+      const forms: string[] = [String(args.path ?? "")];
+      if (Array.isArray(args._rulePaths)) forms.push(...args._rulePaths.map(String));
       const expanded = pat.startsWith("~/") ? joinHome(pat) : pat;
-      if (expanded === pat) return globMatch(path, pat);
-      return path === expanded || path.replaceAll("\\", "/").startsWith(expanded.replace(/\/\*\*.*$/, "/"));
+      for (const raw of forms) {
+        const path = raw.replaceAll("\\", "/");
+        if (expanded === pat) { if (globMatch(path, pat)) return true; }
+        else if (path === expanded || path.startsWith(expanded.replace(/\/\*\*.*$/, "/"))) return true;
+      }
+      return false;
     }
     case "webfetch": {
       const url = String(args.url ?? "");

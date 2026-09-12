@@ -243,6 +243,7 @@ export function saveConfig(cfg: GoatConfig): void {
   if (cfg.fallbackModels.length) payload.fallback_models = cfg.fallbackModels;
   else delete payload.fallback_models;
   if (cfg.repos.length) payload.repos = cfg.repos;
+  else delete payload.repos;
   writeFileSync(configPath(), JSON.stringify(payload, null, 2), "utf8");
 }
 

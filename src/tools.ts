@@ -184,6 +184,20 @@ export class ToolKit {
 
   get multiRepo(): boolean { return this.roots.size > 0; }
 
+  /**
+   * Every path form a rule might reference for a resolved file: repo-prefixed
+   * display path, absolute, and repo-relative (so deny Edit(src/**) covers
+   * every repo's src/, not just the primary root's).
+   */
+  ruleForms(abs: string): string[] {
+    const forms = [this.displayPath(abs), abs];
+    for (const r of [...this.roots.values(), this.root]) {
+      const rel = relative(r, abs);
+      if (rel && !rel.startsWith("..") && !isAbsolute(rel)) forms.push(rel.replaceAll("\\", "/"));
+    }
+    return forms;
+  }
+
   /** Display form for a tool path: repo/rel inside a workspace, plain rel otherwise. */
   displayPath(abs: string): string {
     for (const [name, r] of this.roots) {
@@ -438,9 +452,13 @@ export class ToolKit {
   }
 
   async tool_write(args: Record<string, any>): Promise<ToolResult> {
-    const denied = await this.ask("write", args);
+    let p: string;
+    try { p = this.inside(String(args.path), args.repo ? String(args.repo) : undefined); }
+    catch (e: any) { return { ok: false, output: e.message }; }
+    // Rules match the raw arg AND the resolved display path (repo/...) — a
+    // deny like Edit(src/**) must not be defeated by workspace repo prefixes.
+    const denied = await this.ask("write", { ...args, _rulePaths: this.ruleForms(p) });
     if (denied) return denied;
-    const p = this.inside(String(args.path), args.repo ? String(args.repo) : undefined);
     mkdirSync(dirname(p), { recursive: true });
     const existed = existsSync(p);
     const before = existed ? readFileSync(p, "utf8") : "";
@@ -451,9 +469,11 @@ export class ToolKit {
   }
 
   async tool_edit(args: Record<string, any>): Promise<ToolResult> {
-    const denied = await this.ask("edit", args);
+    let p: string;
+    try { p = this.inside(String(args.path), args.repo ? String(args.repo) : undefined); }
+    catch (e: any) { return { ok: false, output: e.message }; }
+    const denied = await this.ask("edit", { ...args, _rulePaths: this.ruleForms(p) });
     if (denied) return denied;
-    const p = this.inside(String(args.path), args.repo ? String(args.repo) : undefined);
     if (!existsSync(p)) return { ok: false, output: `not a file: ${args.path}` };
     const text = readFileSync(p, "utf8");
     const old = String(args.old_string ?? ""), neu = String(args.new_string ?? "");
@@ -675,6 +695,7 @@ export class ToolKit {
   tool_glob(args: Record<string, any>): ToolResult {
     let pattern = String(args.pattern ?? "");
     const matches: string[] = [];
+    const seen = new Set<string>();
     // repo-prefixed pattern narrows to that repo: "api/src/**/*.ts"
     let bases: Array<{ disp: string; root: string }>; // display prefix + search root
     const slash = pattern.indexOf("/");
@@ -696,8 +717,14 @@ export class ToolKit {
           const abs = join(dir, e.name);
           if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walkAbs(abs); }
           else {
+            // Dedupe by absolute path: a repo nested under the primary root is
+            // reached by both the root walk and the per-repo walk.
+            if (seen.has(abs)) continue;
             const rel = relative(base, abs).replaceAll("\\", "/");
-            if (fnmatch(rel, pattern) || fnmatch(e.name, pattern)) matches.push(disp + rel);
+            if (fnmatch(rel, pattern) || fnmatch(e.name, pattern)) {
+              seen.add(abs);
+              matches.push(disp + rel);
+            }
           }
         }
       };
@@ -712,22 +739,25 @@ export class ToolKit {
     catch (e: any) { return { ok: false, output: `invalid regex: ${e.message}` }; }
     const glob = args.glob ? String(args.glob) : null;
     const results: string[] = [];
+    const seenAbs = new Set<string>();
     // scope: explicit repo arg, or ALL roots when multiRepo and no path given
-    let scope: Array<{ disp: string; root: string }>;
+    let scope: Array<{ root: string }>;
     const pathArg = args.path ? String(args.path) : null;
     if (args.repo) {
       const r = this.roots.get(String(args.repo));
       if (!r) return { ok: false, output: `unknown repo "${args.repo}"` };
-      scope = [{ disp: String(args.repo) + "/", root: pathArg ? insideRoot(r, pathArg) : r }];
+      scope = [{ root: pathArg ? insideRoot(r, pathArg) : r }];
     } else if (pathArg) {
       const base = this.inside(pathArg);
-      scope = [{ disp: "", root: base }];
+      scope = [{ root: base }];
     } else if (this.roots.size) {
-      scope = [{ disp: "", root: this.root }, ...[...this.roots].map(([n, r]) => ({ disp: n + "/", root: r }))];
+      // root + every repo; files in a repo nested under root are reached twice —
+      // seenAbs dedupes them (and displayPath names each once, repo-prefixed).
+      scope = [{ root: this.root }, ...[...this.roots].map(([, r]) => ({ root: r }))];
     } else {
-      scope = [{ disp: "", root: this.root }];
+      scope = [{ root: this.root }];
     }
-    for (const { disp, root } of scope) {
+    for (const { root } of scope) {
       const scan = (dir: string) => {
         let entries;
         try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -736,6 +766,7 @@ export class ToolKit {
           const abs = join(dir, e.name);
           if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) scan(abs); }
           else {
+            if (seenAbs.has(abs)) continue;
             if (glob && !fnmatch(e.name, glob)) continue;
             let text: string;
             try {
@@ -743,6 +774,7 @@ export class ToolKit {
               text = readFileSync(abs, "utf8");
               if (text.includes("\0")) continue; // binary
             } catch { continue; }
+            seenAbs.add(abs);
             text.split("\n").forEach((line, i) => {
               if (results.length >= GREP_MAX_RESULTS) return;
               if (rx.test(line)) {
