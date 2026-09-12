@@ -36,6 +36,8 @@ DEMO = os.environ.get("GOAT_DEMO", "read")
 DEMO_QUESTION = {
     "write": "create notes.txt with the line: hello from the goat pen",
     "todo": "track a 3-step plan: scan, group, triage",
+    "codegraph": "/index",          # custom driver below sends both commands
+    "goatmode": "run: echo goat mode works",
 }.get(DEMO, "what does @t.txt say?")
 
 
@@ -72,6 +74,7 @@ def main() -> None:
     cfg_obj = {
         "model": "anthropic/claude-sonnet-4-5",
         "max_tokens": 512,
+        "repos": [str((ROOT / "docs" / ".goatdemo-proj" / "src").resolve())],
         "endpoints": {
             "anthropic": {
                 "base_url": f"http://127.0.0.1:{PORT}/v1",
@@ -92,11 +95,58 @@ def main() -> None:
         cfg_obj["fallback_models"] = ["fallback/claude-sonnet-4-5"]
     (goat_home / "config.json").write_text(json.dumps(cfg_obj, indent=2), encoding="utf-8")
 
+    # Stage tree-sitter wasm into appDir()/vendor so /index uses the real
+    # parser (TS/JS/Go) instead of the regex heuristic — resolver candidate #3.
+    vendor = goat_home / "vendor"
+    vendor.mkdir(parents=True, exist_ok=True)
+    nm = ROOT / "node_modules"
+    shutil.copy(nm / "web-tree-sitter" / "tree-sitter.wasm", vendor / "tree-sitter.wasm")
+    wasms_out = nm / "tree-sitter-wasms" / "out"
+    for g in ("tsx", "javascript", "python", "go"):
+        src = wasms_out / f"tree-sitter-{g}.wasm"
+        if src.exists():
+            shutil.copy(src, vendor / src.name)
+
     # --- demo project ---
     proj = ROOT / "docs" / ".goatdemo-proj"
     shutil.rmtree(proj, ignore_errors=True)
     proj.mkdir(parents=True, exist_ok=True)  # an orphaned winpty-agent may hold it as CWD
     (proj / "t.txt").write_text("hello from the goat pen\n", encoding="utf-8")
+
+    # TS sources for the codegraph capture (repos → .../.goatdemo-proj/src)
+    srcdir = proj / "src"
+    srcdir.mkdir(parents=True, exist_ok=True)
+    (srcdir / "users.ts").write_text(
+        "import { db } from './db.ts';\n\n"
+        "export interface User { id: string; email: string; quota: number }\n\n"
+        "export async function createUser(email: string): Promise<User> {\n"
+        "  const user = { id: crypto.randomUUID(), email, quota: 100 };\n"
+        "  await db.insert('users', user);\n"
+        "  return user;\n}\n\n"
+        "export async function findUser(id: string): Promise<User | null> {\n"
+        "  return db.selectOne('users', { id });\n}\n", encoding="utf-8")
+    (srcdir / "db.ts").write_text(
+        "export const db = {\n"
+        "  async insert(table: string, row: object) { /* … */ },\n"
+        "  async selectOne(table: string, where: object) { return null; },\n};\n", encoding="utf-8")
+    (srcdir / "api.ts").write_text(
+        "import { createUser } from './users.ts';\n\n"
+        "export async function handleSignup(email: string) {\n"
+        "  const user = await createUser(email);\n"
+        "  return Response.json(user);\n}\n", encoding="utf-8")
+
+    # The wasm resolver's first candidate is <cwd>/node_modules/…; the TUI runs
+    # in proj, so link the repo's node_modules in for a real (non-heuristic) parse.
+    # Junction (no elevation on Windows) → symlink → copy fallback.
+    link = proj / "node_modules"
+    try:
+        link.symlink_to(nm, target_is_directory=True)
+    except OSError:
+        try:
+            subprocess.run(f'mklink /J "{link}" "{nm}"', shell=True, check=True,
+                           capture_output=True)
+        except Exception:
+            shutil.copytree(nm, link)
 
     # --- mock server(s) ---
     # failover scenario: primary "anthropic" is a dead provider (always 429),
@@ -189,20 +239,54 @@ def main() -> None:
         p.write("\r")
         time.sleep(0.4)
 
-    # boot + welcome
-    drain(7.0)
-    # type the question slowly so the GIF shows typing
-    for ch in DEMO_QUESTION:
-        p.write(ch)
-        drain(0.055)
+    # boot + welcome — v3 needs longer for async MCP/skills init + auth probe
+    drain(15.0)
+
+    def send(text: str) -> None:
+        """Type text char-by-char (triggers autocomplete), accept suggestion, submit."""
+        for ch in text:
+            p.write(ch); drain(0.10)
+        drain(0.6)
+        p.write("\r"); drain(0.5)   # accept completion (or submit if no completion)
+        p.write("\r"); drain(1.0)   # submit the command
+
+    if DEMO == "codegraph":
+        # /index → wait for completion → /find <symbol>
+        send("/index")
+        drain(7.0)
         snap()
-        last_snap[0] = 0
-    p.write(chr(13))
-    # let the agent turn stream: tool call, result, streamed answer
-    # auto-approve the permission dialog when the demo writes a file
-    if DEMO == "write":
+        send("/find createUser")
+        drain(4.0)
+    elif DEMO == "goatmode":
+        # write request → permission dialog appears → shift+tab x3 into GOAT
+        # MODE, which resolves the open prompt YES (mid-turn, no clicks)
+        for ch in "create notes.txt with the line: hello from the goat pen":
+            p.write(ch); drain(0.055)
+        p.write("\r"); drain(6.0)           # dialog is up now
+        for _ in range(3):
+            p.write("\x1b[Z"); drain(1.0)   # ask → accept-edits → plan → bypass
+        drain(20.0)                          # write + diff stream with no prompts
+    elif DEMO == "read":
+        # type the question slowly so the GIF shows typing
+        for ch in DEMO_QUESTION:
+            p.write(ch); drain(0.055)
+            snap()
+            last_snap[0] = 0
+        p.write("\r")
+        # let the agent turn stream: tool call, result, streamed answer
         drain(6.0)
-        p.write("\r")  # Enter = Yes on the dialog
+    else:
+        # write / todo: normal question + permission dialog
+        for ch in DEMO_QUESTION:
+            p.write(ch); drain(0.055)
+            snap()
+            last_snap[0] = 0
+        p.write("\r")
+        # let the agent turn stream: tool call, result, streamed answer
+        # auto-approve the permission dialog when the demo writes a file
+        if DEMO == "write":
+            drain(6.0)
+            p.write("\r")  # Enter = Yes on the dialog
     drain(24.0)
     snap()  # guarantee the final frame is the settled state
 
