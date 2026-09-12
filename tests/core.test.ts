@@ -6,8 +6,8 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve as resolveP } from "node:path";
 
 let home: string;
 const savedEnv: Record<string, string | undefined> = {};
@@ -161,6 +161,132 @@ describe("tools", () => {
     expect(tk.tool_glob({ pattern: "src/**/*.ts" }).output).toContain("c.ts");
     expect(tk.tool_grep({ pattern: "needle" }).output).toContain("needle");
     rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ---------- multi-repo workspace ----------
+describe("workspace", () => {
+  test("resolveRepos handles plain paths, name:path, ~, relative paths, and drive paths", async () => {
+    const { resolveRepos } = await import("../src/config.ts");
+    const proj = mkdtempSync(join(tmpdir(), "goat-ws-"));
+
+    const out = resolveRepos([
+      resolveP(proj, "api"),
+      "ui:" + resolveP(proj, "frontend"),
+      "~/code/svc",
+      "rel-mod",
+      "",
+    ], proj);
+
+    expect(out.api).toBe(resolveP(proj, "api"));
+    expect(out.ui).toBe(resolveP(proj, "frontend"));
+    expect(out.svc).toBe(resolveP(homedir(), "code/svc"));
+    expect(out["rel-mod"]).toBe(resolveP(proj, "rel-mod"));
+
+    const windowsDrive = resolveRepos(["C:\\repos\\api"]);
+    expect(Object.values(windowsDrive)).toEqual([resolveP("C:\\repos\\api")]);
+
+    const dups = resolveRepos([resolveP(proj, "a/api"), resolveP(proj, "b/api")], proj);
+    expect(dups.api).toBe(resolveP(proj, "a/api"));
+    expect(dups["api-2"]).toBe(resolveP(proj, "b/api"));
+    rmSync(proj, { recursive: true, force: true });
+  });
+
+  test("repos round-trip through loadConfig/saveConfig", async () => {
+    const { loadConfig, saveConfig, configPath } = await import("../src/config.ts");
+    expect(loadConfig(home).repos).toEqual([]);
+    writeFileSync(join(home, "config.json"), JSON.stringify({ repos: ["api:~/code/api"] }));
+    const cfg = loadConfig(home);
+    expect(cfg.repos).toEqual(["api:~/code/api"]);
+    cfg.repos = ["ui:~/code/ui"];
+    saveConfig(cfg);
+    expect(JSON.parse(readFileSync(configPath(), "utf8")).repos).toEqual(["ui:~/code/ui"]);
+  });
+
+  test("inside() resolves repo-prefixed paths and explicit repo args", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const apiRoot = mkdtempSync(join(tmpdir(), "goat-ws-api-"));
+    const uiRoot = mkdtempSync(join(tmpdir(), "goat-ws-ui-"));
+    writeFileSync(join(apiRoot, "package.json"), "{}");
+    const tk = new ToolKit("/tmp/proj", { roots: { api: apiRoot, ui: uiRoot } });
+
+    expect(tk.inside("package.json", "api")).toBe(join(apiRoot, "package.json"));
+    expect(tk.inside("api/package.json")).toBe(join(apiRoot, "package.json"));
+    expect(tk.inside("ui")).toBe(uiRoot);
+    expect(tk.inside("ui\\src\\App.tsx")).toBe(join(uiRoot, "src/App.tsx"));
+    expect(tk.multiRepo).toBe(true);
+    expect(tk.inside("src/x.ts")).toBe(resolveP("/tmp/proj/src/x.ts"));
+
+    rmSync(apiRoot, { recursive: true, force: true });
+    rmSync(uiRoot, { recursive: true, force: true });
+  });
+
+  test("inside() sandboxes per repo and stays v2-compatible without repos", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const apiRoot = mkdtempSync(join(tmpdir(), "goat-ws-api-"));
+    const uiRoot = mkdtempSync(join(tmpdir(), "goat-ws-ui-"));
+    const tk = new ToolKit("/tmp/proj", { roots: { api: apiRoot, ui: uiRoot } });
+
+    expect(() => tk.inside("../malicious.ts", "api")).toThrow(/escapes project root/);
+    expect(() => tk.inside("api/../ui/src/x.ts")).toThrow();
+    expect(() => tk.inside("x.ts", "nope")).toThrow(/unknown repo/);
+
+    const solo = new ToolKit("/tmp/proj");
+    expect(solo.multiRepo).toBe(false);
+    expect(solo.inside("src/x.ts")).toBe(resolveP("/tmp/proj/src/x.ts"));
+    expect(() => solo.inside("../out.ts")).toThrow();
+    expect(() => solo.inside("x.ts", "api")).toThrow(/unknown repo/);
+
+    rmSync(apiRoot, { recursive: true, force: true });
+    rmSync(uiRoot, { recursive: true, force: true });
+  });
+
+  test("displayPath prefixes repo names and falls back to the primary root", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const apiRoot = mkdtempSync(join(tmpdir(), "goat-ws-api-"));
+    const uiRoot = mkdtempSync(join(tmpdir(), "goat-ws-ui-"));
+    const tk = new ToolKit("/tmp/proj", { roots: { api: apiRoot, ui: uiRoot } });
+
+    expect(tk.displayPath(join(apiRoot, "src/index.ts"))).toBe("api/src/index.ts");
+    expect(tk.displayPath(join(uiRoot, "App.tsx"))).toBe("ui/App.tsx");
+    expect(tk.displayPath(apiRoot)).toBe("api");
+    expect(tk.displayPath("/tmp/proj/local.ts")).toBe("local.ts");
+    expect(tk.displayPath("/tmp/outside.ts")).toBe("/tmp/outside.ts");
+
+    rmSync(apiRoot, { recursive: true, force: true });
+    rmSync(uiRoot, { recursive: true, force: true });
+  });
+
+  test("read/write/grep flow across repos end-to-end", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const base = mkdtempSync(join(tmpdir(), "goat-ws-e2e-"));
+    const api = join(base, "api"), ui = join(base, "ui");
+    mkdirSync(join(api, "src"), { recursive: true });
+    mkdirSync(ui, { recursive: true });
+    writeFileSync(join(api, "src", "main.ts"), "export const token = 42;");
+    const tk = new ToolKit(base, { autoApprove: true, roots: { api, ui } });
+
+    const r = tk.tool_read({ path: "api/src/main.ts" });
+    expect(r.ok).toBe(true);
+    expect(r.output).toContain("token = 42");
+    expect(tk.tool_grep({ pattern: "token" }).output).toContain("api/src/main.ts:1:");
+    const w = await tk.dispatch("write", { path: "note.txt", repo: "ui", content: "hi" });
+    expect(w.ok).toBe(true);
+    expect(existsSync(join(ui, "note.txt"))).toBe(true);
+    expect(tk.tool_grep({ pattern: "hi", repo: "ui" }).output).toContain("ui/note.txt:1:");
+    const bad = await tk.dispatch("read", { path: "../outside.txt", repo: "api" });
+    expect(bad.ok).toBe(false);
+
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  test("system prompt includes workspace repos only when configured", async () => {
+    const { buildExtraSystem } = await import("../src/context.ts");
+    expect(buildExtraSystem([], home)).not.toContain("Workspace repos");
+    const extra = buildExtraSystem([], home, { api: "/tmp/api", ui: "/tmp/ui" });
+    expect(extra).toContain("# Workspace repos");
+    expect(extra).toContain("api: /tmp/api");
+    expect(extra).toContain("ui: /tmp/ui");
   });
 });
 

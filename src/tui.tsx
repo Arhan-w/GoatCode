@@ -15,7 +15,7 @@ import { join, relative, resolve as resolvePath } from "node:path";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Agent, type AgentEvent } from "./agent.ts";
 import { COMMAND_DESC, SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
-import { appDir, loadConfig, saveConfig, splitModel, type GoatConfig } from "./config.ts";
+import { appDir, loadConfig, saveConfig, splitModel, resolveRepos, type GoatConfig } from "./config.ts";
 import { contextPct } from "./window.ts";
 import { atCompletions, listProjectFiles } from "./refs.ts";
 
@@ -297,7 +297,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       const m = modeRef.current;
       // one ToolKit per session so the undo stack + bg tasks survive turns
       if (!toolsRef.current || toolsRef.current.root !== sessionRef.current.cwd)
-        toolsRef.current = new ToolKit(sessionRef.current.cwd);
+        toolsRef.current = new ToolKit(sessionRef.current.cwd, { roots: resolveRepos(cfgRef.current.repos, sessionRef.current.cwd) });
       const tools = toolsRef.current;
       // plan mode: read-only — mutating tools are denied up front
       tools.readonly = m === "plan";
@@ -321,7 +321,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         maxSteps: cfgRef.current.maxSteps,
         fallbacks,
         cache: cfgRef.current.cachePrompts,
-        extraSystem: [buildExtraSystem(skills, sessionRef.current.cwd),
+        extraSystem: [buildExtraSystem(skills, sessionRef.current.cwd, resolveRepos(cfgRef.current.repos, sessionRef.current.cwd)),
           loadOutputStyle(cfgRef.current.outputStyle)].filter(Boolean).join("\n\n"),
       });
     } catch (e) {
@@ -506,7 +506,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       const cmd = text.slice(1).trim();
       (async () => {
         if (!toolsRef.current || toolsRef.current.root !== sessionRef.current.cwd)
-          toolsRef.current = new ToolKit(sessionRef.current.cwd);
+          toolsRef.current = new ToolKit(sessionRef.current.cwd, { roots: resolveRepos(cfgRef.current.repos, sessionRef.current.cwd) });
         const tk = toolsRef.current;
         const wasAuto = tk.autoApprove, hadPerm = tk.permission;
         tk.autoApprove = true; tk.permission = null;

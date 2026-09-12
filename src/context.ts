@@ -5,7 +5,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { appDir } from "./config.ts";
+import { appDir, type GoatConfig } from "./config.ts";
 import type { SkillDef } from "./skills/loader.ts";
 
 export function skillsBlock(skills: SkillDef[]): string {
@@ -33,8 +33,15 @@ export function projectMemory(cwd: string): string {
   return parts.join("\n\n");
 }
 
-export function buildExtraSystem(skills: SkillDef[], cwd: string): string {
-  return [projectMemory(cwd), skillsBlock(skills)].filter(Boolean).join("\n\n");
+export function buildExtraSystem(skills: SkillDef[], cwd: string, repos?: Record<string, string>): string {
+  const blocks = [projectMemory(cwd), skillsBlock(skills)];
+  if (repos && Object.keys(repos).length) {
+    const lines = Object.entries(repos)
+      .map(([name, path]) => `  ${name}: ${path}`)
+      .join("\n");
+    blocks.push(`# Workspace repos (use repo/... path or repo:"name" arg):\n${lines}`);
+  }
+  return blocks.filter(Boolean).join("\n\n");
 }
 
 /**

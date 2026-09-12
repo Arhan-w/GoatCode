@@ -39,6 +39,8 @@
     "marked-terminal": "^7.3.0",
     "react": "^19.2.8",
     "react-devtools-core": "^7.0.1",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "0.25.6",
     "zod": "^4.5.4"
   },
   "bun": {

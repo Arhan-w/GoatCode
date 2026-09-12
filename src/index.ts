@@ -19,7 +19,7 @@
  */
 import { run } from "./tui.tsx";
 import { buildUserContent } from "./refs.ts";
-import { appDir, configPath, loadConfig, saveConfig, splitModel, type CustomEndpoint, type WireFormat } from "./config.ts";
+import { appDir, configPath, loadConfig, saveConfig, splitModel, resolveRepos, type CustomEndpoint, type WireFormat } from "./config.ts";
 import { CredentialStore, OAUTH_PROVIDERS, ProviderRegistry, normalizeBaseUrl, type Credential } from "./providers.ts";
 import { listSessions } from "./session.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
@@ -371,7 +371,7 @@ async function main(): Promise<number> {
     if (!query) { console.error("nothing to do: pass a prompt to -p or pipe text on stdin"); return 1; }
     const r = await resolve(cfg, registry);
     const session = Session.new(process.cwd(), cfg.model);
-    const tools = new ToolKit(process.cwd(), { autoApprove: cfg.autoApprove, rules: cfg.permissions });
+    const tools = new ToolKit(process.cwd(), { autoApprove: cfg.autoApprove, rules: cfg.permissions, roots: resolveRepos(cfg.repos, process.cwd()) });
     tools.hooks = cfg.hooks;
     let mcp = null;
     if (Object.keys(cfg.mcpServers).length) {
@@ -388,7 +388,7 @@ async function main(): Promise<number> {
       session, tools,
       maxTokens: cfg.maxTokens, temperature: cfg.temperature, maxSteps: cfg.maxSteps,
       cache: cfg.cachePrompts,
-      extraSystem: [buildExtraSystem(allSkills(cfg), process.cwd()),
+      extraSystem: [buildExtraSystem(allSkills(cfg), process.cwd(), resolveRepos(cfg.repos, process.cwd())),
         loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
     });
     let out = "";

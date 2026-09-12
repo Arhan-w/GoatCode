@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 
 export const APP_DIR_NAME = ".goatcode";
 export const PROJECT_CONFIG_NAME = "goatcode.json";
@@ -48,6 +48,8 @@ export interface GoatConfig {
   maxTokens: number;
   temperature: number | null;
   autoApprove: boolean;
+  /** Multi-repo workspace: absolute-ish repo specs ("~/code/api" or "api:~/code/api"). */
+  repos: string[];
   maxSteps: number;
   endpoints: Record<string, CustomEndpoint>;
   mcpServers: Record<string, McpServerConfig>;
@@ -164,6 +166,7 @@ export function loadConfig(projectDir: string = process.cwd()): GoatConfig {
       ? (data.fallback_models ?? data.fallbackModels).map(String).filter((m: string) => m.includes("/"))
       : [],
     projectMcpNames: new Set(),
+    repos: Array.isArray(data.repos) ? data.repos : [],
   };
   for (const [pid, ed] of Object.entries<any>(data.endpoints ?? {})) {
     if (ed && typeof ed === "object") cfg.endpoints[pid] = endpointFrom(pid, ed);
@@ -239,7 +242,38 @@ export function saveConfig(cfg: GoatConfig): void {
   if (cfg.outputStyle) payload.output_style = cfg.outputStyle;
   if (cfg.fallbackModels.length) payload.fallback_models = cfg.fallbackModels;
   else delete payload.fallback_models;
+  if (cfg.repos.length) payload.repos = cfg.repos;
   writeFileSync(configPath(), JSON.stringify(payload, null, 2), "utf8");
+}
+
+/**
+ * Resolve the `repos` workspace config into a name→absolute-path map.
+ * Each entry is "~/code/api" (name = basename) or "api:~/code/api" (explicit
+ * name). Windows drive paths ("C:\\x") never match the name:path form because
+ * the prefix before ':' must be a bare slug (no slashes/backslashes).
+ */
+export function resolveRepos(cfg: Pick<GoatConfig, "repos"> | string[], projectDir: string = process.cwd()): Record<string, string> {
+  const specs = Array.isArray(cfg) ? cfg : cfg.repos;
+  const out: Record<string, string> = {};
+  for (const raw of specs) {
+    const spec = String(raw).trim();
+    if (!spec) continue;
+    let name = "";
+    let p = spec;
+    // A drive-qualified path (C:\repo or D:/repo) is one path, not name:path.
+    const colon = /^[A-Za-z]:[\\/]/.test(spec) ? -1 : spec.indexOf(":");
+    if (colon > 0 && /^[A-Za-z0-9._-]+$/.test(spec.slice(0, colon))) {
+      name = spec.slice(0, colon);
+      p = spec.slice(colon + 1);
+    }
+    p = p.replace(/^~(?=$|[\\/])/, homedir());
+    const abs = isAbsolute(p) ? resolve(p) : resolve(projectDir, p);
+    if (!name) name = basename(abs).toLowerCase() || "repo";
+    let uniq = name;
+    for (let i = 2; out[uniq]; i++) uniq = `${name}-${i}`;
+    out[uniq] = abs;
+  }
+  return out;
 }
 
 export function fileExists(p: string): boolean {

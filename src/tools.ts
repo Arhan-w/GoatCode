@@ -8,7 +8,7 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { decide } from "./permissions.ts";
 import { fireHooks, type HooksConfig } from "./hooks.ts";
 import { log } from "./logger.ts";
@@ -119,6 +119,21 @@ export function fnmatch(rel: string, pattern: string): boolean {
   return new RegExp("^" + rx + "$").test(rel);
 }
 
+/**
+ * Membership, not string-prefix: "/root" prefixes "/rootkit" but isn't its
+ * parent. Throws if path escapes base. Absolute inputs are honored (so an
+ * existing absolute path round-trips); relative resolve against base.
+ */
+export function insideRoot(base: string, path: string): string {
+  const p = resolve(base, path);
+  if (p !== base) {
+    const rel = relative(base, p);
+    if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+      throw new Error(`path escapes project root: ${path}`);
+  }
+  return p;
+}
+
 function walk(root: string, onFile: (abs: string, rel: string) => boolean | void): void {
   let entries;
   try { entries = readdirSync(root, { withFileTypes: true }); } catch { return; }
@@ -141,6 +156,8 @@ export interface BgTask {
 
 export class ToolKit {
   root: string;
+  /** Multi-repo workspace: name -> absolute repo root. Empty = single-root v2 mode. */
+  roots = new Map<string, string>();
   permission: PermissionFn | null;
   autoApprove: boolean;
   readonly = false;
@@ -156,23 +173,51 @@ export class ToolKit {
   private bg = new Map<string, BgTask>();
   private todos: Todo[] = [];
 
-  constructor(root: string, opts: { permission?: PermissionFn; autoApprove?: boolean; readonly?: boolean; rules?: { allow: string[]; deny: string[] } } = {}) {
+  constructor(root: string, opts: { permission?: PermissionFn; autoApprove?: boolean; readonly?: boolean; rules?: { allow: string[]; deny: string[] }; roots?: Record<string, string> } = {}) {
     this.root = resolve(root);
     this.permission = opts.permission ?? null;
     this.autoApprove = opts.autoApprove ?? false;
     this.readonly = opts.readonly ?? false;
     this.rules = opts.rules;
+    if (opts.roots) for (const [n, r] of Object.entries(opts.roots)) this.roots.set(n, resolve(r));
   }
 
-  /** Membership, not string-prefix: "/root" prefixes "/rootkit" but isn't its parent. */
-  inside(path: string): string {
-    const p = resolve(this.root, path);
-    if (p !== this.root) {
-      const rel = relative(this.root, p);
-      if (rel === "" || rel.startsWith(".."))
-        throw new Error(`path escapes project root: ${path}`);
+  get multiRepo(): boolean { return this.roots.size > 0; }
+
+  /** Display form for a tool path: repo/rel inside a workspace, plain rel otherwise. */
+  displayPath(abs: string): string {
+    for (const [name, r] of this.roots) {
+      const rel = relative(r, abs);
+      if (rel === "" || (!isAbsolute(rel) && !rel.startsWith("..") && rel !== "..")) {
+        const suffix = rel.replaceAll("\\", "/");
+        return suffix ? `${name}/${suffix}` : name;
+      }
     }
-    return p;
+    const rel = relative(this.root, abs).replaceAll("\\", "/");
+    return rel === "" || rel.startsWith("..") ? abs.replaceAll("\\", "/") : rel;
+  }
+
+  /**
+   * Resolve a tool path to an absolute path, sandboxed.
+   *   inside("api/src/x.ts")      → repo api's root/src/x.ts   (workspace mode)
+   *   inside("x.ts", "api")       → same, explicit repo arg
+   *   inside("x.ts")              → this.root/x.ts             (single-root, v2 behavior)
+   * A leading known repo name wins; plain paths fall back to this.root.
+   */
+  inside(path: string, repo?: string): string {
+    if (repo) {
+      const base = this.roots.get(repo);
+      if (!base) throw new Error(`unknown repo "${repo}" — workspace has: ${[...this.roots.keys()].join(", ")}`);
+      return insideRoot(base, path);
+    }
+    if (this.roots.size) {
+      const norm = path.replaceAll("\\", "/");
+      const slash = norm.indexOf("/");
+      const head = slash > 0 ? norm.slice(0, slash) : norm;
+      const base = this.roots.get(head);
+      if (base) return insideRoot(base, slash > 0 ? norm.slice(slash + 1) : ".");
+    }
+    return insideRoot(this.root, path);
   }
 
   registerExternal(tool: ExternalTool): void {
@@ -362,7 +407,7 @@ export class ToolKit {
   // ---- implementations --------------------------------------------------
 
   tool_read(args: Record<string, any>): ToolResult {
-    const p = this.inside(String(args.path));
+    const p = this.inside(String(args.path), args.repo ? String(args.repo) : undefined);
     if (!existsSync(p) || !statSync(p).isFile()) return { ok: false, output: `not a file: ${args.path}` };
     const ext = p.toLowerCase().slice(p.lastIndexOf("."));
     if (IMAGE_TYPES[ext]) {
@@ -395,7 +440,7 @@ export class ToolKit {
   async tool_write(args: Record<string, any>): Promise<ToolResult> {
     const denied = await this.ask("write", args);
     if (denied) return denied;
-    const p = this.inside(String(args.path));
+    const p = this.inside(String(args.path), args.repo ? String(args.repo) : undefined);
     mkdirSync(dirname(p), { recursive: true });
     const existed = existsSync(p);
     const before = existed ? readFileSync(p, "utf8") : "";
@@ -408,7 +453,7 @@ export class ToolKit {
   async tool_edit(args: Record<string, any>): Promise<ToolResult> {
     const denied = await this.ask("edit", args);
     if (denied) return denied;
-    const p = this.inside(String(args.path));
+    const p = this.inside(String(args.path), args.repo ? String(args.repo) : undefined);
     if (!existsSync(p)) return { ok: false, output: `not a file: ${args.path}` };
     const text = readFileSync(p, "utf8");
     const old = String(args.old_string ?? ""), neu = String(args.new_string ?? "");
@@ -590,7 +635,7 @@ export class ToolKit {
       return { ok: false, output: "undo blocked by plan mode — the user can still run /undo from the prompt" };
     const rec = this.undo();
     if (!rec) return { ok: false, output: "nothing to undo" };
-    const shown = relative(this.root, rec.path).replaceAll("\\", "/") || rec.path;
+    const shown = this.displayPath(rec.path);
     return { ok: true, output: `reverted ${shown}${rec.existed ? "" : " (deleted — file was created this session)"}` };
   }
 
@@ -628,23 +673,36 @@ export class ToolKit {
   }
 
   tool_glob(args: Record<string, any>): ToolResult {
-    const pattern = String(args.pattern ?? "");
+    let pattern = String(args.pattern ?? "");
     const matches: string[] = [];
-    const base = this.root;
-    const walkAbs = (dir: string) => {
-      let entries;
-      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-      for (const e of entries) {
-        if (matches.length >= GLOB_MAX_RESULTS) return;
-        const abs = join(dir, e.name);
-        if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walkAbs(abs); }
-        else {
-          const rel = relative(base, abs).replaceAll("\\", "/");
-          if (fnmatch(rel, pattern) || fnmatch(e.name, pattern)) matches.push(rel);
+    // repo-prefixed pattern narrows to that repo: "api/src/**/*.ts"
+    let bases: Array<{ disp: string; root: string }>; // display prefix + search root
+    const slash = pattern.indexOf("/");
+    const head = slash > 0 ? pattern.slice(0, slash) : "";
+    if (this.roots.size && head && this.roots.has(head)) {
+      bases = [{ disp: head + "/", root: this.roots.get(head)! }];
+      pattern = pattern.slice(slash + 1);
+    } else if (this.roots.size) {
+      bases = [{ disp: "", root: this.root }, ...[...this.roots].map(([n, r]) => ({ disp: n + "/", root: r }))];
+    } else {
+      bases = [{ disp: "", root: this.root }];
+    }
+    for (const { disp, root: base } of bases) {
+      const walkAbs = (dir: string) => {
+        let entries;
+        try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+          if (matches.length >= GLOB_MAX_RESULTS) return;
+          const abs = join(dir, e.name);
+          if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walkAbs(abs); }
+          else {
+            const rel = relative(base, abs).replaceAll("\\", "/");
+            if (fnmatch(rel, pattern) || fnmatch(e.name, pattern)) matches.push(disp + rel);
+          }
         }
-      }
-    };
-    walkAbs(base);
+      };
+      walkAbs(base);
+    }
     return { ok: true, output: matches.sort().join("\n") + (matches.length >= GLOB_MAX_RESULTS ? "\n... (truncated)" : "") || "(no matches)" };
   }
 
@@ -652,55 +710,74 @@ export class ToolKit {
     let rx: RegExp;
     try { rx = new RegExp(String(args.pattern)); }
     catch (e: any) { return { ok: false, output: `invalid regex: ${e.message}` }; }
-    const base = this.inside(String(args.path ?? "."));
     const glob = args.glob ? String(args.glob) : null;
     const results: string[] = [];
-    const scan = (dir: string) => {
-      let entries;
-      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-      for (const e of entries) {
-        if (results.length >= GREP_MAX_RESULTS) return;
-        const abs = join(dir, e.name);
-        if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) scan(abs); }
-        else {
-          if (glob && !fnmatch(e.name, glob)) continue;
-          let text: string;
-          try {
-            if (statSync(abs).size > 2_000_000) continue;
-            text = readFileSync(abs, "utf8");
-            if (text.includes("\0")) continue; // binary
-          } catch { continue; }
-          text.split("\n").forEach((line, i) => {
-            if (results.length >= GREP_MAX_RESULTS) return;
-            if (rx.test(line)) {
-              const rel = relative(this.root, abs).replaceAll("\\", "/");
-              results.push(`${rel}:${i + 1}:${line.slice(0, 200)}`);
-            }
-          });
+    // scope: explicit repo arg, or ALL roots when multiRepo and no path given
+    let scope: Array<{ disp: string; root: string }>;
+    const pathArg = args.path ? String(args.path) : null;
+    if (args.repo) {
+      const r = this.roots.get(String(args.repo));
+      if (!r) return { ok: false, output: `unknown repo "${args.repo}"` };
+      scope = [{ disp: String(args.repo) + "/", root: pathArg ? insideRoot(r, pathArg) : r }];
+    } else if (pathArg) {
+      const base = this.inside(pathArg);
+      scope = [{ disp: "", root: base }];
+    } else if (this.roots.size) {
+      scope = [{ disp: "", root: this.root }, ...[...this.roots].map(([n, r]) => ({ disp: n + "/", root: r }))];
+    } else {
+      scope = [{ disp: "", root: this.root }];
+    }
+    for (const { disp, root } of scope) {
+      const scan = (dir: string) => {
+        let entries;
+        try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+          if (results.length >= GREP_MAX_RESULTS) return;
+          const abs = join(dir, e.name);
+          if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) scan(abs); }
+          else {
+            if (glob && !fnmatch(e.name, glob)) continue;
+            let text: string;
+            try {
+              if (statSync(abs).size > 2_000_000) continue;
+              text = readFileSync(abs, "utf8");
+              if (text.includes("\0")) continue; // binary
+            } catch { continue; }
+            text.split("\n").forEach((line, i) => {
+              if (results.length >= GREP_MAX_RESULTS) return;
+              if (rx.test(line)) {
+                results.push(`${this.displayPath(abs)}:${i + 1}:${line.slice(0, 200)}`);
+              }
+            });
+          }
         }
-      }
-    };
-    scan(base);
+      };
+      scan(root);
+    }
     return { ok: true, output: results.join("\n") + (results.length >= GREP_MAX_RESULTS ? "\n... (truncated)" : "") || "(no matches)" };
   }
 }
 
 function builtinSpecs(): ToolSpec[] {
+  const repoDesc = { type: "string", description: "Workspace repo name (optional; plain paths can also start with repoName/)" };
   return [
     { name: "read", description: "Read a file from the project. Text files return numbered lines; images (png/jpg/gif/webp) are shown to the model visually.",
       parameters: { type: "object", properties: {
-        path: { type: "string", description: "File path relative to project root" },
+        path: { type: "string", description: "File path relative to project root (repo-prefixed in workspaces: api/src/x.ts)" },
+        repo: repoDesc,
         offset: { type: "integer", description: "1-based start line (optional)" },
         limit: { type: "integer", description: "Max lines to read (optional)" },
       }, required: ["path"] } },
     { name: "write", description: "Create or overwrite a file with exact content. The change can be reverted with undo.",
       parameters: { type: "object", properties: {
         path: { type: "string" },
+        repo: repoDesc,
         content: { type: "string", description: "Full file content" },
       }, required: ["path", "content"] } },
     { name: "edit", description: "Replace one exact string in a file (must match once). The change can be reverted with undo.",
       parameters: { type: "object", properties: {
         path: { type: "string" },
+        repo: repoDesc,
         old_string: { type: "string", description: "Exact text to replace, unique in file" },
         new_string: { type: "string" },
       }, required: ["path", "old_string", "new_string"] } },
@@ -714,8 +791,15 @@ function builtinSpecs(): ToolSpec[] {
       parameters: { type: "object", properties: {} } },
     { name: "tasks", description: "List background bash tasks and their status.",
       parameters: { type: "object", properties: {} } },
-    { name: "glob", description: "Find files by pattern, e.g. 'src/**/*.ts'.",
+    { name: "glob", description: "Find files by pattern, e.g. 'src/**/*.ts'. In a workspace, scans ALL repos and returns repoName/ paths (prefix the pattern with a repo name to narrow).",
       parameters: { type: "object", properties: { pattern: { type: "string" } }, required: ["pattern"] } },
+    { name: "grep", description: "Search file contents by regex. Returns path:line:text. In a workspace with no path/repo arg, scans ALL repos. Always prefer this over bash grep/find.",
+      parameters: { type: "object", properties: {
+        pattern: { type: "string", description: "Regex" },
+        path: { type: "string", description: "Subdirectory to search (default .)" },
+        repo: { type: "string", description: "Limit to a workspace repo" },
+        glob: { type: "string", description: "Filename filter, e.g. '*.py'" },
+      }, required: ["pattern"] } },
     { name: "task", description:
       "Launch a focused sub-agent with a fresh context that shares your tools. It has ZERO knowledge of this conversation — brief it completely. Use for research/exploration (subagent_type 'explore' = read-only) or self-contained multi-step work. It returns one final report; you must summarize it for the user.",
       parameters: { type: "object", properties: {
