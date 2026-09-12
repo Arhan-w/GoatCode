@@ -17,12 +17,17 @@ import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
 import type { McpClient } from "./mcp/client.ts";
 import type { SkillDef } from "./skills/loader.ts";
+import type { CollabSession } from "./collab/client.ts";
+import { runCodeSlash } from "./code/slash.ts";
+import { installPlugin, listInstalled, removePlugin, updatePlugin, searchPlugins, parseGoatUri, DEFAULT_REGISTRY_URL } from "./plugins/marketplace.ts";
+import { resolveRepos } from "./config.ts";
 
 export const SLASH_COMMANDS = [
   "/help", "/model", "/models", "/providers", "/auth", "/logout",
   "/new", "/clear", "/compact", "/sessions", "/resume", "/rename", "/export",
   "/mcp", "/skills", "/plugin", "/cost", "/usage", "/context", "/config",
   "/status", "/memory", "/doctor", "/init", "/review", "/undo", "/rewind", "/permissions", "/search", "/tasks", "/quit",
+  "/peers", "/handoff", "/share", "/leave", "/index", "/find", "/marketplace",
 ];
 
 export interface SlashIO {
@@ -51,6 +56,8 @@ export interface SlashIO {
   compactNow(): Promise<string>;
   /** Re-scan plugin dirs; returns total active skills+commands. */
   reloadPlugins(): number;
+  /** Active collab session (Pillar B). */
+  collab?: CollabSession | null;
 }
 
 export function runSlash(line: string, io: SlashIO): boolean {
@@ -550,6 +557,75 @@ export function runSlash(line: string, io: SlashIO): boolean {
       return true;
     }
 
+    case "/index":
+    case "/find": {
+      void runCodeSlash(line, {
+        roots: resolveRepos(io.cfg.repos, process.cwd()),
+        push: (n: any) => io.push(<Text color="#7c8390">  {typeof n?.text === "string" ? n.text : String(n?.text ?? n ?? "")}</Text>),
+      });
+      return true;
+    }
+
+    case "/marketplace": {
+      const q = arg;
+      io.push(<Text dimColor color="#7c8390">  marketplace: {DEFAULT_REGISTRY_URL}</Text>);
+      (async () => {
+        try {
+          const res = q ? await searchPlugins(q, io.cfg) : listInstalled(io.cfg);
+          if (typeof res === "string") { io.push(<Text color="#f87171">  {res}</Text>); return; }
+          const items = "plugins" in res ? res.plugins : res;
+          const list = items as Array<{ name: string; version: string; description: string }>;
+          if (!list.length) { io.push(<Text dimColor color="#7c8390">  no results</Text>); return; }
+          io.push(
+            <Box flexDirection="column">
+              {list.map((p) => (
+                <Text key={p.name}>  <Text color="#4ade80">✓ {p.name}</Text> <Text dimColor color="#7c8390">v{p.version}</Text> — {p.description}</Text>
+              ))}
+            </Box>,
+          );
+        } catch (e: any) { io.push(<Text color="#f87171">  marketplace error: {e?.message ?? e}</Text>); }
+      })();
+      return true;
+    }
+
+    case "/peers": {
+      const cs = io.collab;
+      if (!cs) { io.push(<Text dimColor color="#7c8390">  collab: not active</Text>); return true; }
+      const peers = cs.peers();
+      io.push(<Text>  peers: {peers.length ? peers.map((p) => p.name).join(", ") : "(none)"}</Text>);
+      const holder = cs.holder();
+      io.push(<Text>  turn: <Text color="#a855f7">{holder === cs.actor ? "you" : holder ?? "unknown"}</Text></Text>);
+      return true;
+    }
+
+    case "/handoff": {
+      const cs = io.collab;
+      if (!cs) { io.push(<Text dimColor color="#7c8390">  collab: not active</Text>); return true; }
+      const target = rest.join(" ").trim();
+      if (!target) { io.push(<Text>usage: /handoff &lt;peer name&gt;</Text>); return true; }
+      if (!cs.peers().some((p) => p.name === target)) { io.push(<Text color="#f87171">✗ no such peer "{target}" (see /peers)</Text>); return true; }
+      if (cs.holder() !== cs.actor) { io.push(<Text color="#f87171">✗ only the turn holder can hand off</Text>); return true; }
+      cs.grant(target);
+      io.push(<Text color="#4ade80">✓ turn handed to {target}</Text>);
+      return true;
+    }
+
+    case "/share": {
+      const cs = io.collab;
+      if (!cs) { io.push(<Text dimColor color="#7c8390">  collab: not active</Text>); return true; }
+      io.push(<Text>  invite code:</Text>);
+      io.push(<Text dimColor color="#7c8390">  {cs.inviteCode}</Text>);
+      return true;
+    }
+
+    case "/leave": {
+      const cs = io.collab;
+      if (!cs) { io.push(<Text dimColor color="#7c8390">  collab: not active</Text>); return true; }
+      cs.close();
+      io.push(<Text color="#4ade80">✓ left the collab room</Text>);
+      return true;
+    }
+
     default:
       io.push(<Text color="#f87171">✗ unknown command {cmd}</Text>);
       return true;
@@ -677,6 +753,12 @@ export const COMMAND_DESC: Record<string, string> = {
   "/export": "save the conversation (md/html)", "/doctor": "diagnose install (live probe)",
   "/init": "create GOAT.md", "/review": "review a PR", "/undo": "revert last turn's file changes",
   "/tasks": "list background bash tasks", "/quit": "exit",
+  "/rewind": "jump transcript + files back to a turn", "/search": "full-text search saved sessions",
+  "/permissions": "list always-allow rules this session",
+  "/index": "build/refresh the workspace code index", "/find": "ranked symbol lookup across repos",
+  "/share": "invite into this session (relay)", "/leave": "leave the collab session",
+  "/peers": "list connected peers", "/handoff": "give the turn to a peer",
+  "/marketplace": "browse/install plugins",
 };
 
 function descOf(cmd: string): string {

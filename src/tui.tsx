@@ -16,8 +16,13 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Agent, type AgentEvent } from "./agent.ts";
 import { COMMAND_DESC, SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
 import { appDir, loadConfig, saveConfig, splitModel, resolveRepos, type GoatConfig } from "./config.ts";
+import { registerRemoteAgents } from "./index-shared.ts";
 import { contextPct } from "./window.ts";
 import { atCompletions, listProjectFiles } from "./refs.ts";
+import { makeFindTool, FIND_TOOL_SPEC } from "./code/tool.ts";
+import { autoIndexOnce } from "./code/slash.ts";
+import type { Index } from "./code/indexer.ts";
+import { workspaceHash, readIndex } from "./code/indexer.ts";
 
 /** Replace the trailing token (slash line or @token) with the completion. */
 function acceptCompletion(input: string, kind: "slash" | "at", value: string): string {
@@ -40,6 +45,7 @@ import { log } from "./logger.ts";
 import { contentChars, estimateTokens } from "./llm.ts";
 import type { ContentPart } from "./llm.ts";
 import type { Todo } from "./tools.ts";
+import type { CollabSession } from "./collab/client.ts";
 
 // ---------- theme (goat noir: deep slate + black-green) ----------
 export const ACCENT = "#a855f7";
@@ -213,6 +219,15 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   cfgRef.current = cfg;
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  // Collab (Pillar B): live relay session + a peer/turn mirror for the footer.
+  const [collabPeers, setCollabPeers] = useState<{ id: string; name: string }[]>([]);
+  const [collabHolder, setCollabHolder] = useState<string | null>(null);
+  const collabRef = useRef<CollabSession | null>(null);
+
+  /** True when the local actor holds the collab turn token. */
+  function canSpeakFor(session: CollabSession): boolean {
+    return session.canSpeak(session.actor);
+  }
 
   const push = useCallback((node: ReactNode) => {
     setLines((prev) => [...prev, <Box key={lineKey.current++}>{node}</Box>]);
@@ -258,6 +273,42 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       const hint = cachedUpdateHint();
       if (hint) push(<Text dimColor color={DIM}>  ↑ GoatCode {hint.latest} available — run: goat self-update</Text>);
       else refreshUpdateHint();
+      // Collab: join a relay room advertised by GOAT_COLLAB_INVITE (Pillar B).
+      const inviteCode = process.env.GOAT_COLLAB_INVITE;
+      if (inviteCode && !collabRef.current) {
+        (async () => {
+          try {
+            const { CollabClient } = await import("./collab/client.ts");
+            const actor = process.env.GOAT_COLLAB_NAME || sessionRef.current.id.slice(0, 8);
+            const cs = CollabClient({ invite: inviteCode, name: actor });
+            collabRef.current = cs;
+            cs.onPeers((peers) => { setCollabPeers(peers); setCollabHolder(cs.holder()); });
+            cs.onOp((op) => {
+              setCollabHolder(cs.holder()); // turn ops moved the token
+              if (op.kind === "msg") {
+                const text = String((op.payload as { text?: string }).text ?? "");
+                push(<Text color={ACCENT}>◈ {op.actor}: {text}</Text>);
+                // surface the peer message to the model on the next turn
+                try {
+                  sessionRef.current.append({ role: "user", content: `[peer ${op.actor}] ${text}` });
+                  sessionRef.current.save();
+                } catch { /* session append is best-effort */ }
+              } else if (op.kind === "write") {
+                const p = op.payload as { repo?: string; path?: string };
+                push(<Text dimColor color={DIM}>  peer {op.actor} wrote {p.repo ? p.repo + "/" : ""}{p.path ?? "?"}</Text>);
+              }
+            });
+            cs.onClosed((reason) => {
+              push(<Text color={RED}>  collab: connection closed ({reason})</Text>);
+              collabRef.current = null; setCollabPeers([]); setCollabHolder(null);
+            });
+            await cs.ready;
+            push(<Text dimColor color={DIM}>  ⚡ collab active — {cs.peers().length} peer(s) · turn: {cs.holder() === actor ? "you" : (cs.holder() ?? "waiting")}</Text>);
+          } catch (e: any) {
+            push(<Text color={RED}>  collab join failed: {e?.message ?? e}</Text>);
+          }
+        })();
+      }
     })();
   }, [push]);
 
@@ -314,6 +365,23 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       if (mcp)
         for (const spec of mcp.specs())
           tools.registerExternal({ spec, run: (args) => mcp.dispatch(spec.name, args) });
+      // Find tool (Pillar A)
+      const roots = new Map(Object.entries(resolveRepos(cfgRef.current.repos, sessionRef.current.cwd)));
+      void autoIndexOnce(roots, (p) => { /* progress is a no-op in live frame; /index shows it */ });
+      const indexCache = new Map<string, Index | null>();
+      const getIndex = (): Index | null => {
+        const h = workspaceHash(roots);
+        if (!indexCache.has(h)) indexCache.set(h, readIndex(h));
+        return indexCache.get(h) ?? null;
+      };
+      tools.registerExternal({ spec: FIND_TOOL_SPEC, run: makeFindTool({ roots, getIndex }) });
+      // remote goat agents (Pillar C) — mounted as remote_<name> tools
+      if (cfgRef.current.remoteAgents?.length) {
+        const n = await registerRemoteAgents(cfgRef.current, tools);
+        if (n < cfgRef.current.remoteAgents.length)
+          push(<Text dimColor color={DIM}>  ⚠ {cfgRef.current.remoteAgents.length - n} remote agent(s) skipped — set GOAT_REMOTE_TOKEN_&lt;NAME&gt;</Text>);
+        else if (n) push(<Text dimColor color={DIM}>  ⚡ {n} remote agent(s) mounted</Text>);
+      }
       return new Agent({
         client: r.client, smallClient: smallClient ?? undefined,
         session: sessionRef.current, tools,
@@ -401,6 +469,13 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
               if (snap) {
                 const lines = unifiedDiff(snap.before, snap.after);
                 if (lines.length) push(<DiffView path={snap.path} lines={lines} />);
+                // broadcast write op to collab peers (Pillar B)
+                const cs = collabRef.current;
+                if (cs) {
+                  const display = agent.tools.displayPath(snap.path);
+                  const repo = display.includes("/") ? display.split("/")[0] : "";
+                  cs.sendOp("write", { repo, path: display, before: snap.before.slice(0, 200), after: snap.after.slice(0, 200) });
+                }
               }
             }
             break;
@@ -480,6 +555,12 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const submit = useCallback((raw: string) => {
     const text = raw.trim();
     if (!text) return;
+    // Collab turn-gate: if not holding the turn, warn and do NOT runTurn
+    const cs = collabRef.current;
+    if (cs && !canSpeakFor(cs)) {
+      push(<Text color="#facc15">  waiting for turn ({cs.holder() ?? "unknown"})</Text>);
+      return;
+    }
     // Mid-turn steering (Claude Code / Codex parity): typing while the agent
     // works queues the message for immediate follow-up instead of dropping it.
     if (thinking) {
@@ -614,6 +695,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           if (r.folded === 0) return "already compacted — nothing older to fold";
           return `summarized ${r.folded} older messages${r.model ? " with the model" : " (deterministic digest fallback)"} — context rebuilt`;
         },
+        collab: collabRef.current,
       };
       runSlash(text, io);
       return;

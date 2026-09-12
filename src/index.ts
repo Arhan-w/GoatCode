@@ -16,6 +16,10 @@
  *   goat resume <id>              resume a session in the TUI
  *   goat -c | --continue          resume the most recent session
  *   goat mcp add <name> <cmd>     add an MCP server
+ *   goat serve [--port 8788]      JSON-RPC agent API (GOAT_AGENT_TOKEN required)
+ *   goat connect <name> <url>     register a remote goat agent as a tool
+ *   goat share | join <code>      real-time collaborative session (relay)
+ *   goat plugin install|list|remove|update|search   marketplace
  */
 import { run } from "./tui.tsx";
 import { buildUserContent } from "./refs.ts";
@@ -335,6 +339,119 @@ async function main(): Promise<number> {
     for (const h of hits)
       console.log(`goat resume ${h.id}  · ${new Date(h.createdAt * 1000).toISOString().slice(0, 10)} · ${h.hits}x · ${h.snippet.slice(0, 72)}`);
     return 0;
+  }
+
+  // goat serve — JSON-RPC 2.0 agent API (requires GOAT_AGENT_TOKEN)
+  if (sub === "serve") {
+    const token = process.env.GOAT_AGENT_TOKEN ?? "";
+    if (!token) { console.error("goat serve: GOAT_AGENT_TOKEN env is required (a bearer token clients must present)"); return 1; }
+    const { startServe } = await import("./protocol/serve.ts");
+    const port = parseInt(flag("--port") ?? "8788", 10);
+    try {
+      const handle = await startServe({ cfg, registry, port, token });
+      console.log(`goat agent listening on ${handle.url}/rpc (cwd ${process.cwd()})`);
+      console.log("  methods: agent.run · agent.capabilities · sessions.list");
+      console.log("  Ctrl+C to stop");
+      await new Promise<void>((resolve) => { process.once("SIGINT", () => { handle.close(); resolve(); }); process.once("SIGTERM", () => { handle.close(); resolve(); }); });
+      return 0;
+    } catch (e: any) { console.error(`serve failed: ${e.message}`); return 1; }
+  }
+
+  // goat connect <name> <url> — register a remote goat agent as a local tool
+  if (sub === "connect") {
+    const name = argv[1], url = argv[2];
+    if (!name || !url) { console.log("usage: goat connect <name> <url>   token via GOAT_REMOTE_TOKEN_<NAME>"); return 1; }
+    const list = cfg.remoteAgents ?? [];
+    const i = list.findIndex((a) => a.name === name);
+    const entry = { name, url };
+    if (i >= 0) list[i] = entry; else list.push(entry);
+    cfg.remoteAgents = list;
+    saveConfig(cfg);
+    console.log(`remote agent '${name}' → ${url}`);
+    console.log(`  set GOAT_REMOTE_TOKEN_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")} with the token, then use the remote_${name} tool`);
+    return 0;
+  }
+
+  // goat share | goat join <code> [name] — real-time collab over the built-in relay
+  if (sub === "share") {
+    const { handleShare } = await import("./collab/handlers.ts");
+    return handleShare(argv.slice(1), cfg);
+  }
+  if (sub === "join") {
+    const code = argv[1];
+    if (!code) { console.log("usage: goat join <invite-code> [name]"); return 1; }
+    const { handleJoin } = await import("./collab/handlers.ts");
+    return handleJoin(code, argv.slice(2), cfg);
+  }
+
+  // goat plugin install|list|remove|update|search <...>
+  if (sub === "plugin" || sub === "plugins") {
+    const action = argv[1];
+    const { installPlugin, listInstalled, removePlugin, updatePlugin, searchPlugins, parseGoatUri } = await import("./plugins/marketplace.ts");
+    const ask = async (msg: string): Promise<boolean> => {
+      if (has("--yes")) return true;
+      process.stdout.write(`${msg} [y/N] `);
+      const chunks: Buffer[] = [];
+      for await (const c of process.stdin as any) { chunks.push(Buffer.from(c)); const s = Buffer.concat(chunks).toString(); const nl = s.indexOf("\n"); if (nl >= 0) { (process.stdin as any).pause?.(); return /^y/i.test(s.slice(0, nl).trim()); } }
+      return false;
+    };
+    try {
+      if (action === "install") {
+        let src = argv[2];
+        if (!src) { console.log("usage: goat plugin install <name|url|file.tgz|goat://plugins/name> [--yes]"); return 1; }
+        const resolveName = async (n: string): Promise<string | null> => {
+          const found: any = await searchPlugins(n, cfg);
+          const hit = Array.isArray(found?.plugins) ? found.plugins.find((p: any) => p.name === n) : null;
+          if (!hit) return null;
+          return hit.tgz ?? hit.url ?? null;
+        };
+        const goatName = parseGoatUri(src);
+        if (goatName) {
+          const url = await resolveName(goatName);
+          if (!url) { console.log(`'${goatName}' not found in the registry`); return 1; }
+          src = url;
+        } else if (!/^(file:\/\/|https?:\/\/)/.test(src) && !src.endsWith(".tgz")) {
+          const url = await resolveName(src);
+          if (url) src = url;
+        }
+        const res = await installPlugin(src, cfg, { confirm: ask });
+        if (res === "refused") { console.log("install refused"); return 1; }
+        saveConfig(cfg);
+        console.log(`✓ installed plugin '${res}' — /plugin reload or restart goat`);
+        return 0;
+      }
+      if (action === "list") {
+        const rows = await listInstalled(cfg);
+        if (!rows.length) console.log("  (no plugins installed)");
+        for (const r of rows) console.log(`  ${r.name.padEnd(20)} ${r.version.padEnd(10)} ${r.dir}`);
+        return 0;
+      }
+      if (action === "remove") {
+        const name = argv[2];
+        if (!name) { console.log("usage: goat plugin remove <name>"); return 1; }
+        removePlugin(name, cfg); saveConfig(cfg);
+        console.log(`removed plugin '${name}'`);
+        return 0;
+      }
+      if (action === "update") {
+        const name = argv[2];
+        if (!name) { console.log("usage: goat plugin update <name>"); return 1; }
+        const changed = await updatePlugin(name, cfg);
+        saveConfig(cfg);
+        console.log(changed ? `✓ updated '${name}'` : `'${name}' is up to date (or registry unavailable)`);
+        return 0;
+      }
+      if (action === "search") {
+        const found: any = await searchPlugins(argv.slice(2).join(" "), cfg);
+        if (typeof found === "string") { console.log(found); return 1; }
+        if (!found.plugins?.length) { console.log("no matches"); return 0; }
+        for (const p of found.plugins) console.log(`  ${p.name.padEnd(20)} ${p.version.padEnd(10)} ${(p.description ?? "").slice(0, 60)}`);
+        console.log("  install: goat plugin install <name>");
+        return 0;
+      }
+    } catch (e: any) { console.error(`plugin ${action} failed: ${e.message}`); return 1; }
+    console.log("usage: goat plugin install|list|remove|update|search ...");
+    return 1;
   }
 
   if (sub === "resume") {

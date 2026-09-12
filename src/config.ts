@@ -71,6 +71,12 @@ export interface GoatConfig {
   fallbackModels: string[];
   /** Server names that came from the project .mcp.json — never persisted to user config. */
   projectMcpNames: Set<string>;
+  /** Marketplace registry override: { url } pointing at an index.json. */
+  pluginRegistry?: { url?: string };
+  /** Remote goat agents registered via `goat connect` (name+url only — tokens never persist). */
+  remoteAgents?: { name: string; url: string }[];
+  /** Raw parsed config.json — read-only passthrough for keys without a typed field (e.g. serve.port). */
+  raw?: Record<string, any>;
 }
 
 export function appDir(): string {
@@ -167,6 +173,14 @@ export function loadConfig(projectDir: string = process.cwd()): GoatConfig {
       : [],
     projectMcpNames: new Set(),
     repos: Array.isArray(data.repos) ? data.repos : [],
+    raw: data,
+    pluginRegistry: data.plugin_registry?.url || data.pluginRegistry?.url
+      ? { url: String(data.plugin_registry?.url ?? data.pluginRegistry?.url) } : undefined,
+    remoteAgents: Array.isArray(data.remote_agents ?? data.remoteAgents)
+      ? (data.remote_agents ?? data.remoteAgents)
+        .filter((r: any) => r && typeof r.name === "string" && typeof r.url === "string")
+        .map((r: any) => ({ name: String(r.name), url: String(r.url) }))
+      : undefined,
   };
   for (const [pid, ed] of Object.entries<any>(data.endpoints ?? {})) {
     if (ed && typeof ed === "object") cfg.endpoints[pid] = endpointFrom(pid, ed);
@@ -244,6 +258,10 @@ export function saveConfig(cfg: GoatConfig): void {
   else delete payload.fallback_models;
   if (cfg.repos.length) payload.repos = cfg.repos;
   else delete payload.repos;
+  // Plugin dirs round-trip under "plugins" (the same key loadConfig reads).
+  if (cfg.pluginDirs.length) payload.plugins = cfg.pluginDirs;
+  if (cfg.pluginRegistry?.url) payload.plugin_registry = { url: cfg.pluginRegistry.url };
+  if (cfg.remoteAgents?.length) payload.remote_agents = cfg.remoteAgents;
   writeFileSync(configPath(), JSON.stringify(payload, null, 2), "utf8");
 }
 
