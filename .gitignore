@@ -21,3 +21,5 @@ docs/.omni-readme.md
 tmp_tar_test/
 docs/spike_*
 docs/.renderrepro-home/
+
+.vercel
