@@ -110,6 +110,39 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 
 ---
 
+## Demos
+
+![GoatCode v3 — Code Intelligence](docs/assets/demo-code.gif)
+*`/index` builds the workspace code graph, then `/find x` ranks symbols across repos.*
+
+![GoatCode v3 — Collaboration](docs/assets/demo-collab.gif)
+*Real-time P2P relay collaboration via invite code — presence, turn tokens, peer chat.*
+
+![GoatCode v3 — Sharing](docs/assets/demo-share.gif)
+*Generate a collab invite code and join a shared workspace session.*
+
+![GoatCode v3 — Ultracode Mode](docs/assets/demo-ultra.gif)
+*`/ultracode` decomposes the goal into parallel subagent scouts that fan out and synthesize.*
+
+### Other features
+
+![GoatCode v3 — Failover](docs/assets/demo-failover.gif)
+*Intelligent provider failover: primary 429s, fallback answers on the next port.*
+
+![GoatCode v3 — Read](docs/assets/demo-read.gif)
+*Default demo: read a file from the workspace.*
+
+![GoatCode v3 — Todo](docs/assets/demo-todo.gif)
+*`/todo` tracks a multi-step plan.*
+
+![GoatCode v3 — Write](docs/assets/demo-write.gif)
+*Auto-approve permission to write files to the workspace.*
+
+![GoatCode v3 — Diff](docs/assets/demo-diff.gif)
+*File diff preview and code change tracking.*
+
+---
+
 ## Architecture & Development
 
 GoatCode is built with clean, modular TypeScript:
