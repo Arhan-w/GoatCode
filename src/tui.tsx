@@ -1,5 +1,5 @@
 /**
- * GoatCode v2 — Claude Code-style Ink/React REPL.
+ * GoatCode — Claude Code-style Ink/React REPL.
  *
  *   ❯ prompt box with rounded border + mode · model · path footer
  *   thinking spinner (verb + elapsed + tokens + "esc to interrupt")
@@ -17,6 +17,7 @@ import { Agent, type AgentEvent } from "./agent.ts";
 import { COMMAND_DESC, SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
 import { appDir, loadConfig, saveConfig, splitModel, resolveRepos, type GoatConfig } from "./config.ts";
 import { registerRemoteAgents } from "./index-shared.ts";
+import { VERSION } from "./constants.ts";
 import { contextPct } from "./window.ts";
 import { atCompletions, listProjectFiles } from "./refs.ts";
 import { makeFindTool, FIND_TOOL_SPEC } from "./code/tool.ts";
@@ -101,6 +102,10 @@ const MODE_LABEL: Record<Mode, string> = {
   bypass: "🐐 GOAT MODE — unchained",
 };
 const MODE_ORDER: Mode[] = ["default", "acceptEdits", "plan", "bypass"];
+
+function modeColor(m: Mode): string {
+  return (m as "default" | "bypass" | "acceptEdits" | "plan") === "default" ? DIM : (m as "default" | "bypass" | "acceptEdits" | "plan") === "bypass" ? "#ff0" : ACCENT;
+}
 
 interface PermRequest {
   tool: string;
@@ -353,6 +358,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       // plan mode: read-only — mutating tools are denied up front
       tools.readonly = m === "plan";
       tools.autoApprove = m === "bypass";
+      tools.goat = m === "bypass";
       tools.rules = cfgRef.current.permissions;
       tools.hooks = cfgRef.current.hooks;
       tools.sessionId = sessionRef.current.id;
@@ -673,7 +679,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           setMode(m);
           setCfg((c) => ({ ...c, autoApprove: m === "bypass" }));
           const tk = toolsRef.current;
-          if (tk) { tk.autoApprove = m === "bypass"; tk.readonly = m === "plan"; }
+          if (tk) { tk.autoApprove = m === "bypass"; tk.goat = m === "bypass"; tk.readonly = m === "plan"; }
         },
         reloadPlugins: () => {
           const pl = loadPlugins(cfgRef.current.pluginDirs.map((d) => resolvePath(process.cwd(), d)));
@@ -720,10 +726,11 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       const tk = toolsRef.current;
       if (tk) {
         tk.autoApprove = next === "bypass";
+        tk.goat = next === "bypass";
         tk.readonly = next === "plan";
       }
       if (next === "bypass")
-        push(<Text color="#facc15">  🐐 GOAT MODE — every tool auto-approves, no prompts. shift+tab to step back.</Text>);
+        push(<Text color="#facc15">  🐐 GOAT MODE — no prompts, no rules, no sandbox. Full power. shift+tab to step back.</Text>);
       return next;
     });
   }, [push]);
@@ -935,14 +942,18 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         )}
       </Box>
 
-      {cfg.statusLine?.command && statusLines.length ? (
+      {mode === "bypass" ? (
+      <Box paddingLeft={1} marginBottom={1}>
+        <Text color="#facc15" bold>  🐐 ULTRACODE ACTIVE · no sandbox · no rules · no prompts · subagents fan to 8</Text>
+      </Box>
+      ) : cfg.statusLine?.command && statusLines.length ? (
         <Box flexDirection="column" paddingLeft={1}>
           {statusLines.map((l, i) => <Text key={i} dimColor color={DIM}>{l}</Text>)}
         </Box>
       ) : (
         <Box paddingLeft={1}>
           <Text dimColor color={DIM}>
-            <Text color={mode === "default" ? DIM : mode === "bypass" ? "#facc15" : ACCENT}>{MODE_LABEL[mode]}</Text>
+            <Text color={modeColor(mode)}>{MODE_LABEL[mode]} {(mode as string) === "bypass" ? " 🚀 ULTRACODE" : ""}</Text>
             {"  (shift+tab to cycle)  ·  "}{cfg.model}
             {"  ·  "}{shortPath(session.cwd)}
             {"  ·  "}
@@ -1018,11 +1029,11 @@ function Welcome({ cfg, cwd }: { cfg: GoatConfig; cwd: string }) {
       <Text>
         <Text color={ACCENT}>{goat.map((l, i) => l + "\n").join("")}</Text>
         <Text color={ACCENT} bold>  GoatCode</Text>
-        <Text dimColor color={DIM}>  v2.1  ·  every provider, one terminal</Text>
+        <Text dimColor color={DIM}>  v{VERSION}  ·  every provider, one terminal</Text>
       </Text>
       <Text dimColor color={DIM}>  model {cfg.model}</Text>
       <Text dimColor color={DIM}>  path  {shortPath(cwd)}</Text>
-      <Text dimColor color={DIM}>  tips  /help · /providers · shift+tab cycles mode</Text>
+      <Text dimColor color={DIM}>  tips  /index · /find · /share · shift+tab cycles mode</Text>
     </Box>
   );
 }

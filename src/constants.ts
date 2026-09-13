@@ -4,6 +4,8 @@ export const MAX_WEBFETCH_BYTES = 200_000;
 export const WEBFETCH_TIMEOUT_MS = 30_000;
 /** Sub-agent step budget — smaller than the main loop's 40. */
 export const SUBAGENT_MAX_STEPS = 25;
+/** Max sub-agents fanned out in parallel per ultracode batch. */
+export const ULTRACODE_FANOUT = 8;
 /** Single source of truth for the version string — keep in lock-step with
  *  package.json (enforced by a test) and the git tag you cut. */
 export const VERSION = "3.0.0";

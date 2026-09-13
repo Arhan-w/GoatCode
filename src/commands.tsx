@@ -21,6 +21,7 @@ import type { CollabSession } from "./collab/client.ts";
 import { runCodeSlash } from "./code/slash.ts";
 import { installPlugin, listInstalled, removePlugin, updatePlugin, searchPlugins, parseGoatUri, DEFAULT_REGISTRY_URL } from "./plugins/marketplace.ts";
 import { resolveRepos } from "./config.ts";
+import { ULTRACODE_FANOUT } from "./constants.ts";
 
 export const SLASH_COMMANDS = [
   "/help", "/model", "/models", "/providers", "/auth", "/logout",
@@ -390,6 +391,29 @@ export function runSlash(line: string, io: SlashIO): boolean {
       return true;
     }
 
+    case "/ultraplan": {
+      const topic = rest.join(" ") || "this project";
+      const n = Math.min(ULTRACODE_FANOUT, 8);
+      const scouts = [
+        `Deep audit of ${topic}: read every source file, list all functions/classes, dependencies, and their coupling. Report in markdown with file:line references.`,
+        `Security audit of ${topic}: find injection vectors, hardcoded secrets, privilege escalation paths, SSRF/prototype-polution risks, unsafe eval/exec patterns.`,
+        `Performance audit of ${topic}: find O(n²) loops, redundant work, un-indexed lookups, unbounded allocations, missing caches, blocking I/O in hot paths.`,
+        `Architecture review of ${topic}: identify circular dependencies, leaky abstractions, god objects, violated boundaries, and single points of failure.`,
+        `Testing gaps in ${topic}: find untested edge cases, missing error paths, flaky test assumptions, absent integration coverage, and brittle fixtures.`,
+        `DevX and DX friction in ${topic}: find confusing APIs, missing docs, unclear error messages, inconsistent naming, and setup blockers for new contributors.`,
+      ];
+      const prompt =
+        "You are an elite code-review strategist. Decompose the analysis into " + n +
+        " independent scouts that explore " + topic + " in parallel, then synthesize a single prioritized plan.\n\n" +
+        "SPAWN " + n + " task calls IN ONE MESSAGE. Each task gets one of these roles (pick the best fit each time, rotate):\n" +
+        scouts.map((s, i) => (i + 1) + ". " + s).join("\n") +
+        "\n\nAfter all scouts return, read every report and produce a single unified plan:\n" +
+        "- Critical bugs (must fix now)\n- Security vulnerabilities\n- Performance bottlenecks\n- Architecture debt\n- Testing gaps\n- DX improvements\n- Nice-to-haves\n" +
+        "For each item: name, one-line description, file:line location, and suggested fix. Keep the plan under ~200 lines.";
+      void io.runTurn(prompt);
+      return true;
+    }
+
     case "/rename": {
       const t = rest.join(" ").trim();
       if (!t) { io.push(<Text>usage: /rename &lt;short title&gt;</Text>); return true; }
@@ -752,7 +776,8 @@ export const COMMAND_DESC: Record<string, string> = {
   "/status": "session + provider status", "/memory": "show GOAT.md", "/rename": "rename the session",
   "/export": "save the conversation (md/html)", "/doctor": "diagnose install (live probe)",
   "/init": "create GOAT.md", "/review": "review a PR", "/undo": "revert last turn's file changes",
-  "/tasks": "list background bash tasks", "/quit": "exit",
+  "/tasks": "list background bash tasks", "/ultraplan": "decompose into parallel scouts → unified plan",
+  "/quit": "exit",
   "/rewind": "jump transcript + files back to a turn", "/search": "full-text search saved sessions",
   "/permissions": "list always-allow rules this session",
   "/index": "build/refresh the workspace code index", "/find": "ranked symbol lookup across repos",

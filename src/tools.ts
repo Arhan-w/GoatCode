@@ -160,6 +160,8 @@ export class ToolKit {
   roots = new Map<string, string>();
   permission: PermissionFn | null;
   autoApprove: boolean;
+  /** GOAT MODE: no sandbox, no rules, no prompts — every tool fully unchained. */
+  goat = false;
   readonly = false;
   /** settings.json-style allow/deny rules, consulted before the prompt. */
   rules: { allow: string[]; deny: string[] } | undefined;
@@ -173,10 +175,11 @@ export class ToolKit {
   private bg = new Map<string, BgTask>();
   private todos: Todo[] = [];
 
-  constructor(root: string, opts: { permission?: PermissionFn; autoApprove?: boolean; readonly?: boolean; rules?: { allow: string[]; deny: string[] }; roots?: Record<string, string> } = {}) {
+  constructor(root: string, opts: { permission?: PermissionFn; autoApprove?: boolean; goat?: boolean; readonly?: boolean; rules?: { allow: string[]; deny: string[] }; roots?: Record<string, string> } = {}) {
     this.root = resolve(root);
     this.permission = opts.permission ?? null;
     this.autoApprove = opts.autoApprove ?? false;
+    this.goat = opts.goat ?? false;
     this.readonly = opts.readonly ?? false;
     this.rules = opts.rules;
     if (opts.roots) for (const [n, r] of Object.entries(opts.roots)) this.roots.set(n, resolve(r));
@@ -219,6 +222,12 @@ export class ToolKit {
    * A leading known repo name wins; plain paths fall back to this.root.
    */
   inside(path: string, repo?: string): string {
+    if (this.goat) {
+      // GOAT MODE: absolute paths and ../ escapes resolve free — no jail.
+      const base = (repo ? this.roots.get(repo) : undefined) ?? this.root;
+      if (repo && !base) throw new Error(`unknown repo "${repo}" — workspace has: ${[...this.roots.keys()].join(", ")}`);
+      return resolve(base, path);
+    }
     if (repo) {
       const base = this.roots.get(repo);
       if (!base) throw new Error(`unknown repo "${repo}" — workspace has: ${[...this.roots.keys()].join(", ")}`);
@@ -295,6 +304,8 @@ export class ToolKit {
   }
 
   private async ask(tool: string, args: Record<string, unknown>): Promise<ToolResult | null> {
+    // GOAT MODE: no rules, no prompts — the user said "unchained"
+    if (this.goat) return null;
     // plan mode: mutating tools never run — explain how to leave the mode
     if (this.readonly)
       return { ok: false, output: `${tool} blocked by plan mode (read-only). Shift+tab to switch to default/accept-edits mode, or present the plan and let the user approve it.` };
@@ -529,9 +540,9 @@ export class ToolKit {
     try { url = new URL(raw); } catch { return { ok: false, output: `invalid url: ${raw}` }; }
     if (url.protocol !== "http:" && url.protocol !== "https:")
       return { ok: false, output: `only http(s) allowed, got ${url.protocol}` };
-    // SSRF guard: block private/localhost targets (skip permission prompt for them)
+    // SSRF guard: block private/localhost targets (GOAT MODE lifts it too)
     const host = url.hostname.toLowerCase();
-    if (await isPrivateHost(host))
+    if (!this.goat && await isPrivateHost(host))
       return { ok: false, output: `refused private/loopback address: ${host}` };
     const denied = await this.ask("webfetch", args); // WebFetch(domain:x) rules apply
     if (denied) return denied;
@@ -833,7 +844,7 @@ function builtinSpecs(): ToolSpec[] {
         glob: { type: "string", description: "Filename filter, e.g. '*.py'" },
       }, required: ["pattern"] } },
     { name: "task", description:
-      "Launch a focused sub-agent with a fresh context that shares your tools. It has ZERO knowledge of this conversation — brief it completely. Use for research/exploration (subagent_type 'explore' = read-only) or self-contained multi-step work. It returns one final report; you must summarize it for the user.",
+      "Launch a focused sub-agent with a fresh context that shares your tools. It has ZERO knowledge of this conversation — brief it completely. EMIT MULTIPLE task calls in ONE message to fan them out in parallel (up to 8 at once). Use for research/exploration (subagent_type 'explore' = read-only) or self-contained multi-step work. It returns one final report; you must summarize it for the user.",
       parameters: { type: "object", properties: {
         description: { type: "string", description: "3-5 word label" },
         prompt: { type: "string", description: "Full task brief for the sub-agent" },

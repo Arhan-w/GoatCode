@@ -8,7 +8,7 @@ import { contentChars, isRetryableLLMError, textOf, type ChatClient, type Conten
 import { Session, summarize } from "./session.ts";
 import { ToolKit, type PermissionFn, type Todo, type ToolResult } from "./tools.ts";
 import { fireHooks, MAX_STOP_HOOK_CONTINUES } from "./hooks.ts";
-import { SUBAGENT_MAX_STEPS } from "./constants.ts";
+import { SUBAGENT_MAX_STEPS, ULTRACODE_FANOUT } from "./constants.ts";
 
 export const COMPACT_TRIGGER_CHARS = 220_000;
 /** Attempt budget for transient LLM failures (429/5xx/network) within one step. */
@@ -170,7 +170,7 @@ export class Agent {
         // Permission prompts from inside them are serialized by the TUI queue.
         if (toolCalls[i].name === "task" && !this.disallowedTools.has("task")) {
           const batch: ToolCall[] = [];
-          while (i < toolCalls.length && toolCalls[i].name === "task" && batch.length < 3)
+          while (i < toolCalls.length && toolCalls[i].name === "task" && batch.length < ULTRACODE_FANOUT)
             batch.push(toolCalls[i++]);
           for (const c of batch)
             yield { kind: "tool_start", tool: "task", args: c.arguments };
