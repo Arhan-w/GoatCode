@@ -39,18 +39,17 @@ def run_scenario():
                 "models": ["claude-sonnet-4-5"],
             },
         },
+        "repos": [{"name": "demo", "path": str(ROOT / "docs" / ".goatdemo-proj")}],
     }
-    if SCENARIO == "code":
-        (goat_home / "config.json").write_text(json.dumps(cfg_obj, indent=2), encoding="utf-8")
+    (goat_home / "config.json").write_text(json.dumps(cfg_obj, indent=2), encoding="utf-8")
+
     proj = ROOT / "docs" / ".goatdemo-proj"
     shutil.rmtree(proj, ignore_errors=True)
     proj.mkdir(parents=True, exist_ok=True)
     (proj / "t.txt").write_text("hello from the goat pen\n", encoding="utf-8")
-    if SCENARIO == "code":
-        (proj / "src").mkdir(parents=True)
-        (proj / "src" / "main.ts").write_text('const x: number = 1;\nconsole.log(x);\n', encoding="utf-8")
-    if SCENARIO == "collab":
-        os.environ["GOAT_COLLAB_INVITE"] = "v1.urn:goat:collaborate:00000000000000000000000000000000:00000000"
+    (proj / "src").mkdir(parents=True)
+    (proj / "src" / "main.ts").write_text('const x: number = 1;\nconsole.log(x);\n', encoding="utf-8")
+
     mock = None
     try:
         import urllib.request
@@ -61,6 +60,7 @@ def run_scenario():
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             env={**os.environ, "GOAT_DEMO": SCENARIO})
         time.sleep(1.2)
+
     OUTDIR.mkdir(parents=True, exist_ok=True)
     for f in OUTDIR.glob("*.png"): f.unlink()
     (OUTDIR / "frames.json").unlink(missing_ok=True)
@@ -110,19 +110,23 @@ def run_scenario():
             if time.time() - last_snap[0] >= 0.10:
                 snap(); last_snap[0] = time.time()
     def send(text: str) -> None:
-        p.write(text); time.sleep(0.45); p.write("\r"); time.sleep(0.4)
-    # boot
+        for ch in text:
+            p.write(ch); time.sleep(0.04)
+        p.write("\r"); time.sleep(0.4)
+    # boot + settle
     drain(7.0)
     if SCENARIO == "code":
-        send("/index"); drain(3.0)
+        send("/index"); drain(6.0)
         send("/find x"); drain(3.0)
     elif SCENARIO == "collab":
-        send("hello from goat"); drain(4.0)
+        send("/share"); drain(2.0)
+        send("/join v1.urn:goat:collaborate:00000000000000000000000000000000:00000000"); drain(4.0)
     elif SCENARIO == "share":
         send("/share"); drain(5.0)
     elif SCENARIO == "ultra":
-        send("/ultracode build a tiny CLI tool"); drain(5.0)
-        drain(12.0)
+        send("/ultraplan build a tiny CLI tool"); drain(14.0)
+    else:
+        drain(7.0)
     try: p.terminate(force=True)
     except Exception: pass
     if mock: mock.terminate()
