@@ -134,15 +134,6 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 ![GoatCode v3 — Read](docs/assets/demo-read.gif)
 *Streaming agent turn with live tool calls and results.*
 
-![GoatCode v3 — Todo](docs/assets/demo-todo.gif)
-*`/todo` plan tracking with a live in-terminal panel.*
-
-![GoatCode v3 — Write](docs/assets/demo-write.gif)
-*Permission-gated file writes — approve once, watch it land.*
-
-![GoatCode v3 — Diff](docs/assets/demo-diff.gif)
-*File diff preview and code change tracking.*
-
 ---
 
 ## Architecture & Development
