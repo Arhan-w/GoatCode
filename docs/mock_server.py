@@ -21,6 +21,7 @@ PORT = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 
 # two-step story: first call = streaming text + one tool call, second call =
 # streaming answer. Same deterministic timing everywhere.
 DEMO = os.environ.get("GOAT_DEMO", "read")
+if DEMO == "ultra": DEMO = "plan"
 
 if DEMO == "dead":
     # failover demo: a provider that is always at capacity (retry-after: 1s so
@@ -133,9 +134,7 @@ class Handler(BaseHTTPRequestHandler):
                             self.wfile.write(sse({"choices": [{"delta": {"content": word + " "}}]}))
                             self.wfile.flush(); time.sleep(0.08)
                         self.wfile.write(sse({"choices": [{"delta": {}, "finish_reason": "stop"}]}))
-                    self.wfile.write(b"data: [DONE]
-
-")
+                    self.wfile.write(b"data: [DONE]\n\n")
                     return
                 for word in INTRO.split(" "):
                     self.wfile.write(sse({"choices": [{"delta": {"content": word + " "}}]}))
@@ -148,9 +147,7 @@ class Handler(BaseHTTPRequestHandler):
                 Handler.fanout_state["done"] = True
                 time.sleep(0.2)
                 self.wfile.write(sse({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}))
-                self.wfile.write(b"data: [DONE]
-
-")
+                self.wfile.write(b"data: [DONE]\n\n")
                 return
             if tools and not has_tool_result:
                 for word in INTRO.split(" "):

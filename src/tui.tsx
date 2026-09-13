@@ -27,7 +27,11 @@ import { workspaceHash, readIndex } from "./code/indexer.ts";
 
 /** Replace the trailing token (slash line or @token) with the completion. */
 function acceptCompletion(input: string, kind: "slash" | "at", value: string): string {
-  if (kind === "slash") return value + " ";
+  if (kind === "slash") {
+    // replace only the command token; keep any already-typed arguments
+    const rest = input.trim().split(/\s+/).slice(1).join(" ");
+    return value + (rest ? " " + rest + " " : " ");
+  }
   return input.replace(/@[^\s]*$/, "@" + value + " ");
 }
 import { unifiedDiff, diffStats } from "./diff.ts";
@@ -577,16 +581,18 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       push(<Text dimColor color={DIM}>  ⤷ queued for next turn ({queuedRef.current.length})</Text>);
       return;
     }
-    // Enter with the completion menu open accepts, like Claude Code — but an
-    // exact-typed command submits immediately (accepting it would be a no-op)
+    // Enter with the completion menu open accepts, like Claude Code — but only
+    // while still typing the command itself (no space yet). Once the user has
+    // typed arguments, Enter submits; accepting would truncate them.
     if (compOpen && completions.length > 0 && compSel < completions.length) {
       const accepted = acceptCompletion(text, compKind, completions[compSel]);
-      if (accepted !== text) {
+      if (accepted.trimEnd() !== text.trimEnd()) {
         setInput(accepted);
         setCompletions([]);
         setCompOpen(false);
         return;
       }
+      // exact command already typed -> fall through and SUBMIT
     }
     setHistory((h) => [...h, text]);
     setHistIdx(-1);

@@ -39,7 +39,7 @@ def run_scenario():
                 "models": ["claude-sonnet-4-5"],
             },
         },
-        "repos": [{"name": "demo", "path": str(ROOT / "docs" / ".goatdemo-proj")}],
+        "repos": [str(ROOT / "docs" / ".goatdemo-proj")],
     }
     (goat_home / "config.json").write_text(json.dumps(cfg_obj, indent=2), encoding="utf-8")
 
@@ -48,7 +48,12 @@ def run_scenario():
     proj.mkdir(parents=True, exist_ok=True)
     (proj / "t.txt").write_text("hello from the goat pen\n", encoding="utf-8")
     (proj / "src").mkdir(parents=True)
-    (proj / "src" / "main.ts").write_text('const x: number = 1;\nconsole.log(x);\n', encoding="utf-8")
+    (proj / "src" / "app.ts").write_text(
+        "export class App {\n  private port = 3000;\n  start(): void {\n    console.log(`listening on ${this.port}`);\n  }\n  stop(): void {\n    console.log('stopped');\n  }\n}\n",
+        encoding="utf-8")
+    (proj / "src" / "api.ts").write_text(
+        "import { App } from './app.ts';\n\nexport function handleRequest(app: App, path: string): number {\n  if (path === '/health') return 200;\n  app.start();\n  return 404;\n}\n",
+        encoding="utf-8")
 
     mock = None
     try:
@@ -61,16 +66,45 @@ def run_scenario():
             env={**os.environ, "GOAT_DEMO": SCENARIO})
         time.sleep(1.2)
 
+    # Collab: run a real `goat share` relay host and feed its invite to the TUI.
+    relay = None
+    invite = None
+    if SCENARIO in ("collab", "share"):
+        relay = subprocess.Popen(
+            [BUN, "run", str(ROOT / "src" / "index.ts"), "share", "--port", "8791"],
+            cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, env={**os.environ, "GOATCODE_HOME": str(goat_home)})
+        import select as _sel
+        lines_q: queue.Queue[str] = queue.Queue()
+        def _rl():
+            try:
+                for ln in relay.stdout: lines_q.put(ln)
+            except Exception: pass
+        threading.Thread(target=_rl, daemon=True).start()
+        deadline = time.time() + 15
+        while time.time() < deadline and not invite:
+            try:
+                ls = lines_q.get(timeout=0.25).strip()
+            except queue.Empty:
+                continue
+            if len(ls) > 20 and all(ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for ch in ls):
+                invite = ls
+        if not invite:
+            print("WARN: no invite from relay host"); relay.terminate(); relay = None
+
     OUTDIR.mkdir(parents=True, exist_ok=True)
     for f in OUTDIR.glob("*.png"): f.unlink()
     (OUTDIR / "frames.json").unlink(missing_ok=True)
     env = dict(os.environ)
     env["GOATCODE_HOME"] = str(goat_home)
-    env["GOAT_LOG"] = "0"
+    env["GOAT_LOG"] = "1"
     env["TERM"] = "xterm-256color"
     env["FORCE_COLOR"] = "3"
     env["GOAT_MODEL"] = "anthropic/claude-sonnet-4-5"
     env["GOAT_DEMO"] = SCENARIO
+    if invite:
+        env["GOAT_COLLAB_INVITE"] = invite
+        env["GOAT_COLLAB_NAME"] = "goat"
     p = winpty.PtyProcess.spawn([BUN, "run", str(ROOT / "src" / "index.ts")],
                                     cwd=str(proj), dimensions=(ROWS, COLS), env=env)
     stream = pyte.ByteStream()
@@ -119,8 +153,8 @@ def run_scenario():
         send("/index"); drain(6.0)
         send("/find x"); drain(3.0)
     elif SCENARIO == "collab":
-        send("/share"); drain(2.0)
-        send("/join v1.urn:goat:collaborate:00000000000000000000000000000000:00000000"); drain(4.0)
+        send("/peers"); drain(2.5)
+        send("/share"); drain(3.0)
     elif SCENARIO == "share":
         send("/share"); drain(5.0)
     elif SCENARIO == "ultra":
@@ -130,6 +164,9 @@ def run_scenario():
     try: p.terminate(force=True)
     except Exception: pass
     if mock: mock.terminate()
+    if relay:
+        try: relay.terminate()
+        except Exception: pass
     for fr in frames: fr.pop("_sig", None)
     (OUTDIR / "frames.json").write_text(json.dumps(frames), encoding="utf-8")
     print(f"captured {len(frames)} frames -> {OUTDIR}/frames.json [{SCENARIO}]")

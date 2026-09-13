@@ -27,7 +27,7 @@ export const SLASH_COMMANDS = [
   "/help", "/model", "/models", "/providers", "/auth", "/logout",
   "/new", "/clear", "/compact", "/sessions", "/resume", "/rename", "/export",
   "/mcp", "/skills", "/plugin", "/cost", "/usage", "/context", "/config",
-  "/status", "/memory", "/doctor", "/init", "/review", "/undo", "/rewind", "/permissions", "/search", "/tasks", "/quit",
+  "/status", "/memory", "/doctor", "/init", "/review", "/ultraplan", "/undo", "/rewind", "/permissions", "/search", "/tasks", "/quit",
   "/peers", "/handoff", "/share", "/leave", "/index", "/find", "/marketplace",
 ];
 

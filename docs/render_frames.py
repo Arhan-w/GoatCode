@@ -113,6 +113,9 @@ def trim_rows(grid):
 
 
 def main() -> None:
+    # usage: python docs/render_frames.py [name]  -> writes demo-<name>.gif/png
+    name = sys.argv[1] if len(sys.argv) > 1 else ""
+    suffix = ("-" + name) if name else ""
     frames = json.loads((FRAMES / "frames.json").read_text(encoding="utf-8"))
     if not frames:
         print("no frames captured"); sys.exit(1)
@@ -122,8 +125,8 @@ def main() -> None:
     best = frames[-1]
     grid = trim_rows(best["grid"])
     img = draw_frame(grid)
-    img.save(FRAMES.parent / "demo.png")
-    print("demo.png", img.size)
+    img.save(FRAMES.parent / f"demo{suffix}.png")
+    print(f"demo{suffix}.png", img.size)
 
     # --- GIF: downsample frames to ~7 fps ---
     # PIL sizes the GIF from frame 0 and crops the rest to it, so EVERY frame
@@ -146,9 +149,9 @@ def main() -> None:
     if len(gifs) < 2:
         print("too few frames for a gif"); return
     assert len({g.size for g in gifs}) == 1, "gif frames must share one canvas"
-    gifs[0].save(FRAMES.parent / "demo.gif", save_all=True,
+    gifs[0].save(FRAMES.parent / f"demo{suffix}.gif", save_all=True,
                  append_images=gifs[1:], duration=140, loop=0, optimize=True)
-    print("demo.gif", len(gifs), "frames", gifs[0].size)
+    print(f"demo{suffix}.gif", len(gifs), "frames", gifs[0].size)
 
 
 if __name__ == "__main__":

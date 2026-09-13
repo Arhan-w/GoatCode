@@ -4,7 +4,7 @@
 ### The Autonomous Multi-Repo AI Coding Agent for the Terminal
 
 [![CI](https://github.com/Arhan-w/GoatCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Arhan-w/GoatCode/actions)
-[![Release](https://img.shields.io/github/v/release/Arhan-w/Arhan-w/GoatCode?color=a855f7&label=v3.0.1)](https://github.com/Arhan-w/GoatCode/releases)
+[![Release](https://img.shields.io/github/v/release/Arhan-w/GoatCode?color=a855f7&label=v3.0.1)](https://github.com/Arhan-w/GoatCode/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 *Every provider. Multi-repo workspaces. Code intelligence graph. Secure P2P/relay collaboration. Agent-as-a-Service JSON-RPC.*
@@ -99,6 +99,7 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 | `/model <name>` | Switch active model or model alias (`opus`, `sonnet`) |
 | `/index` | Build or refresh the workspace code intelligence index |
 | `/find <symbol>` | Ranked symbol lookup across all workspace repositories |
+| `/ultraplan <goal>` | Fan the goal out to parallel scout subagents, then merge one prioritized plan |
 | `/share` | Generate an invite code and start a collab relay session |
 | `/peers` | List connected peers in the active collab session |
 | `/handoff` | Transfer the turn-token to a peer |
@@ -121,8 +122,8 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 ![GoatCode v3 — Sharing](docs/assets/demo-share.gif)
 *Generate a collab invite code and join a shared workspace session.*
 
-![GoatCode v3 — Ultracode Mode](docs/assets/demo-ultra.gif)
-`/ultraplan` decomposes the goal into parallel scouts that fan out and synthesize.*
+![GoatCode v3 — Ultracode fan-out](docs/assets/demo-ultra.gif)
+*`/ultraplan` decomposes the goal into parallel scouts that fan out via subagents and synthesize one prioritized plan.*
 
 ---
 
