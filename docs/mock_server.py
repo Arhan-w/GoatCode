@@ -49,6 +49,18 @@ if DEMO == "todo":
     ]}
     ANSWER = ("Tracked live: scan done, grouping running now, triage queued. "
               "The list updates in the panel above as each step flips — no polling needed.")
+elif DEMO == "plan":
+    # ultracode demo: main agent fans out 3 parallel scouts; children answer plainly
+    INTRO = "Decomposing the goal across 3 parallel scouts."
+    FANOUT = [
+        {"description": "audit deps", "prompt": "Audit the workspace dependency surface and report findings in two sentences."},
+        {"description": "map modules", "prompt": "Map the module layout of the workspace and report in two sentences."},
+        {"description": "check tests", "prompt": "Check test coverage signals in the workspace and report in two sentences."},
+    ]
+    TOOL_NAME, TOOL_ARGS = "task", {"description": FANOUT[0]["description"], "prompt": FANOUT[0]["prompt"]}
+    ANSWER = ("Synthesized plan from all three scouts: 1) dependency surface is clean, "
+              "2) modules split by domain with no cycles, 3) tests cover every pillar. "
+              "Ship in two PRs: foundation first, then polish.")
 elif DEMO == "long":
     # viewport stress: intro + answer stream dozens of lines — the live frame
     # exceeds short terminals and exposes render corruption (regression repro)
@@ -90,17 +102,56 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    fanout_state = {"done": False}
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("content-length", 0)) or 0))
         messages = body.get("messages", [])
         has_tool_result = any(m.get("role") == "tool" for m in messages)
         tools = body.get("tools") or []
+        sys_txt = str(messages[0].get("content", "")) if messages and messages[0].get("role") == "system" else ""
+        is_child = "sub-agent" in sys_txt
 
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("cache-control", "no-cache")
         self.end_headers()
         try:
+            if DEMO == "plan":
+                if is_child or has_tool_result or Handler.fanout_state.get("done"):
+                    if is_child:
+                        for word in "Scanning the workspace first.".split(" "):
+                            self.wfile.write(sse({"choices": [{"delta": {"content": word + " "}}]}))
+                            self.wfile.flush(); time.sleep(0.04)
+                        self.wfile.write(sse({"choices": [{"delta": {
+                            "tool_calls": [{"index": 0, "id": "call_r1", "type": "function",
+                                            "function": {"name": "read", "arguments": json.dumps({"path": "t.txt"})}}]}}]}))
+                        time.sleep(0.15)
+                        self.wfile.write(sse({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}))
+                    else:
+                        for word in ANSWER.split(" "):
+                            self.wfile.write(sse({"choices": [{"delta": {"content": word + " "}}]}))
+                            self.wfile.flush(); time.sleep(0.08)
+                        self.wfile.write(sse({"choices": [{"delta": {}, "finish_reason": "stop"}]}))
+                    self.wfile.write(b"data: [DONE]
+
+")
+                    return
+                for word in INTRO.split(" "):
+                    self.wfile.write(sse({"choices": [{"delta": {"content": word + " "}}]}))
+                    self.wfile.flush(); time.sleep(0.05)
+                for i, t in enumerate(FANOUT):
+                    self.wfile.write(sse({"choices": [{"delta": {
+                        "tool_calls": [{"index": i, "id": f"call_t{i}", "type": "function",
+                                        "function": {"name": "task", "arguments": json.dumps(t)}}]}}]}))
+                    time.sleep(0.05)
+                Handler.fanout_state["done"] = True
+                time.sleep(0.2)
+                self.wfile.write(sse({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}))
+                self.wfile.write(b"data: [DONE]
+
+")
+                return
             if tools and not has_tool_result:
                 for word in INTRO.split(" "):
                     self.wfile.write(sse({"choices": [{"delta": {"content": word + " "}}]}))
