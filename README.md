@@ -122,7 +122,9 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 *Generate a collab invite code and join a shared workspace session.*
 
 ![GoatCode v3 — Ultracode Mode](docs/assets/demo-ultra.gif)
-*`/ultracode` decomposes the goal into parallel subagent scouts that fan out and synthesize.*
+`/ultraplan` decomposes the goal into parallel scouts that fan out and synthesize.*
+
+---
 
 ### Other features
 
@@ -131,14 +133,6 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 
 ![GoatCode v3 — Read](docs/assets/demo-read.gif)
 *Default demo: read a file from the workspace.*
-
-![GoatCode v3 — Todo](docs/assets/demo-todo.gif)
-*`/todo` tracks a multi-step plan.*
-
-![GoatCode v3 — Write](docs/assets/demo-write.gif)
-*Auto-approve permission to write files to the workspace.*
-
-![GoatCode v3 — Diff](docs/assets/demo-diff.gif)
 *File diff preview and code change tracking.*
 
 ---
