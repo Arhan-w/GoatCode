@@ -206,6 +206,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [completions, setCompletions] = useState<string[]>([]);
   const [compKind, setCompKind] = useState<"slash" | "at">("slash");
   const [compSel, setCompSel] = useState(0);
+  const [compOpen, setCompOpen] = useState(false);
   const [thinkLine, setThinkLine] = useState("");
   const [pasted, setPasted] = useState<string | null>(null); // ctrl+V image path
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -577,9 +578,10 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     // Enter with the completion menu open accepts, like Claude Code
-    if (completions.length > 0 && compSel < completions.length) {
+    if (compOpen && completions.length > 0 && compSel < completions.length) {
       setInput(acceptCompletion(text, compKind, completions[compSel]));
       setCompletions([]);
+      setCompOpen(false);
       return;
     }
     setHistory((h) => [...h, text]);
@@ -847,7 +849,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   useEffect(() => {
     if (input.startsWith("/") && !input.includes(" ")) {
       setCompKind("slash");
-      setCompletions(SLASH_COMMANDS.filter((c) => c.startsWith(input)).slice(0, 8));
+      setCompOpen(true); setCompletions(SLASH_COMMANDS.filter((c) => c.startsWith(input)).slice(0, 8));
       setCompSel(0);
       return;
     }
@@ -856,7 +858,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       const token = m[2];
       const files = listProjectFiles(sessionRef.current.cwd);
       setCompKind("at");
-      setCompletions(atCompletions(token, files));
+      setCompOpen(true); setCompletions(atCompletions(token, files));
       setCompSel(0);
       return;
     }
