@@ -132,7 +132,15 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 *Intelligent provider failover: primary 429s, fallback answers on the next port.*
 
 ![GoatCode v3 — Read](docs/assets/demo-read.gif)
-*Default demo: read a file from the workspace.*
+*Streaming agent turn with live tool calls and results.*
+
+![GoatCode v3 — Todo](docs/assets/demo-todo.gif)
+*`/todo` plan tracking with a live in-terminal panel.*
+
+![GoatCode v3 — Write](docs/assets/demo-write.gif)
+*Permission-gated file writes — approve once, watch it land.*
+
+![GoatCode v3 — Diff](docs/assets/demo-diff.gif)
 *File diff preview and code change tracking.*
 
 ---
