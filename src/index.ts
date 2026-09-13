@@ -488,7 +488,7 @@ async function main(): Promise<number> {
     if (!query) { console.error("nothing to do: pass a prompt to -p or pipe text on stdin"); return 1; }
     const r = await resolve(cfg, registry);
     const session = Session.new(process.cwd(), cfg.model);
-    const tools = new ToolKit(process.cwd(), { autoApprove: cfg.autoApprove, rules: cfg.permissions, roots: resolveRepos(cfg.repos, process.cwd()) });
+    const tools = new ToolKit(process.cwd(), { autoApprove: cfg.autoApprove, goat: cfg.autoApprove, rules: cfg.permissions, roots: resolveRepos(cfg.repos, process.cwd()) });
     tools.hooks = cfg.hooks;
     let mcp = null;
     if (Object.keys(cfg.mcpServers).length) {

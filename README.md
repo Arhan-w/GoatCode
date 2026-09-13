@@ -1,10 +1,10 @@
 <div align="center">
 
-# GoatCode v3.0.0
+# GoatCode v3.0.1
 ### The Autonomous Multi-Repo AI Coding Agent for the Terminal
 
 [![CI](https://github.com/Arhan-w/GoatCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Arhan-w/GoatCode/actions)
-[![Release](https://img.shields.io/github/v/release/Arhan-w/Arhan-w/GoatCode?color=a855f7&label=v3.0.0)](https://github.com/Arhan-w/GoatCode/releases)
+[![Release](https://img.shields.io/github/v/release/Arhan-w/Arhan-w/GoatCode?color=a855f7&label=v3.0.1)](https://github.com/Arhan-w/GoatCode/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 *Every provider. Multi-repo workspaces. Code intelligence graph. Secure P2P/relay collaboration. Agent-as-a-Service JSON-RPC.*

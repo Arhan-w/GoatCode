@@ -8,7 +8,7 @@ export const SUBAGENT_MAX_STEPS = 25;
 export const ULTRACODE_FANOUT = 8;
 /** Single source of truth for the version string — keep in lock-step with
  *  package.json (enforced by a test) and the git tag you cut. */
-export const VERSION = "3.0.0";
+export const VERSION = "3.0.1";
 export const REPO_SLUG = "Arhan-w/GoatCode";
 /** Default port for `goat web`. */
 export const WEB_DEFAULT_PORT = 4847;

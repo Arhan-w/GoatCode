@@ -27,7 +27,7 @@ export async function runPrintTurn(opts: {
   if (!query) return { text: "", session: Session.new(process.cwd(), cfg.model), failed: "nothing to do: pass a prompt to -p or pipe text on stdin" };
   const r = await resolve(cfg, registry);
   const session = Session.new(cwd ?? process.cwd(), cfg.model);
-  const tools = new ToolKit(cwd ?? process.cwd(), { autoApprove: cfg.autoApprove, rules: cfg.permissions, roots: resolveRepos(cfg.repos, cwd ?? process.cwd()) });
+  const tools = new ToolKit(cwd ?? process.cwd(), { autoApprove: cfg.autoApprove, goat: cfg.autoApprove, rules: cfg.permissions, roots: resolveRepos(cfg.repos, cwd ?? process.cwd()) });
   tools.hooks = cfg.hooks;
   let mcp: any = null;
   if (Object.keys(cfg.mcpServers).length) {

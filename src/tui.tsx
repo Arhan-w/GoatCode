@@ -577,12 +577,16 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       push(<Text dimColor color={DIM}>  ⤷ queued for next turn ({queuedRef.current.length})</Text>);
       return;
     }
-    // Enter with the completion menu open accepts, like Claude Code
+    // Enter with the completion menu open accepts, like Claude Code — but an
+    // exact-typed command submits immediately (accepting it would be a no-op)
     if (compOpen && completions.length > 0 && compSel < completions.length) {
-      setInput(acceptCompletion(text, compKind, completions[compSel]));
-      setCompletions([]);
-      setCompOpen(false);
-      return;
+      const accepted = acceptCompletion(text, compKind, completions[compSel]);
+      if (accepted !== text) {
+        setInput(accepted);
+        setCompletions([]);
+        setCompOpen(false);
+        return;
+      }
     }
     setHistory((h) => [...h, text]);
     setHistIdx(-1);
