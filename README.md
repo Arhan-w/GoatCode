@@ -72,14 +72,16 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 
 ## Quick Start
 
-1. Start GoatCode in your project root:
+1. Install and run — **that's it**. With no API key configured, GoatCode boots on **Goated-Flash-Free** (an embedded free model, zero setup):
    ```bash
+   npm install -g goatcode-cli
    goat
    ```
-2. Configure your API key or use FreeLLMAPI:
+2. Add a real provider whenever you want (GoatCode switches to it automatically):
    ```bash
    goat auth openai sk-...
    ```
+   Switch models by hand with `/model flash` (back to free) or `/model anthropic/claude-sonnet-4-5`.
 3. Build the code index and search symbols:
    ```text
    /index
@@ -122,6 +124,9 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 
 ![GoatCode v3 — Sharing](docs/assets/demo-share.gif)
 *Generate a collab invite code and join a shared workspace session.*
+
+![GoatCode v3 — Goated-Flash-Free](docs/assets/demo-flash.gif)
+*Zero config: with no API key set, GoatCode auto-boots the embedded Goated-Flash-Free server and answers instantly — free, on loopback.*
 
 ![GoatCode v3 — Ultracode fan-out](docs/assets/demo-ultra.gif)
 *`/ultraplan` decomposes the goal into parallel scouts that fan out via subagents and synthesize one prioritized plan.*

@@ -104,7 +104,7 @@ def run_scenario():
     (OUTDIR / "frames.json").unlink(missing_ok=True)
     env = dict(os.environ)
     env["GOATCODE_HOME"] = str(goat_home)
-    env["GOAT_LOG"] = "1"
+    env["GOAT_LOG"] = "0"
     env["TERM"] = "xterm-256color"
     env["FORCE_COLOR"] = "3"
     if SCENARIO != "flash":
