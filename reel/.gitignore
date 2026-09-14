@@ -1,0 +1,12 @@
+scene_*/
+clip_*.mp4
+video_xfaded.mp4
+_gif/
+qc/
+fonts/
+*.wav
+*.zip
+img-welcome.png
+src-share.gif
+voice_en-*
+voice_test_hermes.mp3
