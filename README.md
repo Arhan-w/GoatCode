@@ -24,6 +24,7 @@ GoatCode v3 is a major architectural leap designed for professional developers w
 3. **P2P Collaboration Relay (`src/collab`)** — End-to-end encrypted WebSocket relay with Lamport timestamp sequencing, invite codes, turn-tokens, and live peer synchronization.
 4. **Agent-as-a-Service Protocol (`src/protocol`)** — JSON-RPC 2.0 over HTTP (`POST /rpc`) and WebSocket with constant-time token auth, path-jailed execution, and remote agent mounting (`remote_<name>`).
 5. **Signed Plugin Marketplace (`src/plugins`)** — Secure tar+gzip extractor with path-traversal/bomb guards and ed25519 signature verification against pinned keys.
+6. **Goated-Flash-Free** — Zero-config built-in free tier: when no API key is connected, GoatCode auto-boots an embedded Gemini Web proxy, giving you full AI coding out of the box with zero setup.
 
 ---
 
