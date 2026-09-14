@@ -116,6 +116,8 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 
 ## Demos
 
+**🎬 Launch reel (48s, vertical):** https://github.com/Arhan-w/GoatCode/releases/download/v3.0.1/reel_final.mp4
+
 ![GoatCode v3 — Code Intelligence](docs/assets/demo-code.gif)
 *`/index` builds the workspace code graph, then `/find x` ranks symbols across repos.*
 
