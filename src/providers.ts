@@ -6,6 +6,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appDir, type CustomEndpoint, type WireFormat } from "./config.ts";
 import catalogData from "./data/providers.json";
+import { GEMINI_FREE_MODEL, GEMINI_FREE_BASE_URL } from "./gflash.ts";
 
 const ENDPOINT_SUFFIXES = [
   "/chat/completions", "/messages", "/responses",
@@ -105,6 +106,10 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderMeta> = {
     model_prefix: "grok",
   },
 };
+
+/** Goated-Flash-Free: the inbuilt free Gemini Web endpoint. */
+export const GOATED_FLASH_ID = "goated-flash";
+export const GOATED_FLASH_MODEL = GEMINI_FREE_MODEL;
 
 /** Env var fallbacks — keys must match catalog provider ids. */
 export const ENV_KEY_FALLBACK: Record<string, string> = {
@@ -289,5 +294,14 @@ export class ProviderRegistry {
     // 4. expired oauth with refresh token — caller refreshes lazily
     if (stored && stored.kind === "oauth" && stored.refreshToken) return stored;
     return null;
+  }
+
+  /**
+   * Whether Goated-Flash-Free should be the active provider.
+   * It is the default when no provider has credentials and the
+   * user has not explicitly chosen another model.
+   */
+  hasGoatedFlash(): boolean {
+    return this.resolveCredential(GOATED_FLASH_ID) === null;
   }
 }
