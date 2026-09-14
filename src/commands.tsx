@@ -122,7 +122,9 @@ export function runSlash(line: string, io: SlashIO): boolean {
             );
           })}
           {rows.length > 40 && <Text dimColor color="#7c8390">  … {rows.length - 40} more</Text>}
-          <Text dimColor color="#7c8390">  {ready}/{rows.length} configured</Text>
+          io.push(<Text dimColor color="#7c8390">  {ready}/{rows.length} configured</Text>);
+          if (io.registry.hasGoatedFlash())
+            io.push(<Text dimColor color="#a855f7">  ⚡ goated-flash: active (free fallback, no key)</Text>);
         </Box>,
       );
       return true;
@@ -332,6 +334,8 @@ export function runSlash(line: string, io: SlashIO): boolean {
       io.push(<Text>  file:   {configPath()}</Text>);
       io.push(<Text>  model:  {io.cfg.model} · max_tokens {io.cfg.maxTokens} · auto_approve {String(io.cfg.autoApprove)}</Text>);
       io.push(<Text>  edits:  change the JSON directly, or use /model · /auth · /mcp (they save for you)</Text>);
+      if (io.registry.hasGoatedFlash())
+        io.push(<Text dimColor color="#7c8390">  goated-flash: active — free Gemini Web fallback, no key needed</Text>);
       return true;
     }
 
