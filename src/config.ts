@@ -111,6 +111,7 @@ export const MODEL_ALIASES: Record<string, string> = {
   gemini: "gemini/gemini-2.5-pro",
   grok: "xai/grok-4",
   deepseek: "deepseek/deepseek-chat",
+  flash: "goated-flash/gemini-3.5-flash",
 };
 
 export function expandModelAlias(model: string): string {

@@ -49,7 +49,9 @@ __version__ = "1.1.0"
 
 DEFAULT_CONFIG = {
     "port": 8081,
-    "host": "0.0.0.0",
+    # Goated fork: bind loopback only — the server is embedded in GoatCode
+    # and must never be reachable from the LAN.
+    "host": "127.0.0.1",
     "retry_attempts": 3,
     "retry_delay_sec": 2,
     "request_timeout_sec": 180,
@@ -1077,10 +1079,9 @@ def main():
     if args.proxy:
         CONFIG["proxy"] = args.proxy
 
-    # Auto-fetch skipped: gemini_bl is pre-seeded by the caller.
-    # On Windows the default cert store often rejects gemini.google.com
-    # TLS, and the fallback bl is already current for this release.
-    pass
+    new_bl = fetch_latest_bl()
+    if new_bl:
+        CONFIG["gemini_bl"] = new_bl
 
     class ThreadedServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True

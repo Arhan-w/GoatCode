@@ -6,7 +6,8 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appDir, type CustomEndpoint, type WireFormat } from "./config.ts";
 import catalogData from "./data/providers.json";
-import { GEMINI_FREE_MODEL, GEMINI_FREE_BASE_URL } from "./gflash.ts";
+import { GEMINI_FREE_MODEL, GEMINI_FREE_MODELS, GOATED_FLASH_ID, GOATED_FLASH_LABEL } from "./gflash.ts";
+export { GOATED_FLASH_ID };
 
 const ENDPOINT_SUFFIXES = [
   "/chat/completions", "/messages", "/responses",
@@ -107,10 +108,6 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderMeta> = {
   },
 };
 
-/** Goated-Flash-Free: the inbuilt free Gemini Web endpoint. */
-export const GOATED_FLASH_ID = "goated-flash";
-export const GOATED_FLASH_MODEL = GEMINI_FREE_MODEL;
-
 /** Env var fallbacks — keys must match catalog provider ids. */
 export const ENV_KEY_FALLBACK: Record<string, string> = {
   openai: "OPENAI_API_KEY",
@@ -185,6 +182,12 @@ export function loadCatalog(): Map<string, Provider> {
         baseUrl: normalizeBaseUrl(meta.base_url), auth: "oauth", models: [], custom: false,
       });
   }
+  // Goated-Flash-Free: the embedded zero-config fallback (needs no key).
+  providers.set(GOATED_FLASH_ID, {
+    id: GOATED_FLASH_ID, name: GOATED_FLASH_LABEL, format: "openai",
+    baseUrl: "http://127.0.0.1:8765/v1", auth: "none",
+    models: GEMINI_FREE_MODELS, custom: false,
+  });
   return providers;
 }
 
@@ -273,6 +276,8 @@ export class ProviderRegistry {
   }
 
   resolveCredential(providerId: string): Credential | null {
+    // 0. goated-flash is the embedded free provider — always credentialled
+    if (providerId === GOATED_FLASH_ID) return { kind: "api_key", apiKey: "***", expiresAt: 0 };
     // 1. stored credential (oauth or goat-set key)
     const stored = this.store.get(providerId);
     if (stored && credentialValid(stored)) return stored;
@@ -297,11 +302,15 @@ export class ProviderRegistry {
   }
 
   /**
-   * Whether Goated-Flash-Free should be the active provider.
-   * It is the default when no provider has credentials and the
-   * user has not explicitly chosen another model.
+   * Whether the user has NO usable provider credentials at all — the
+   * trigger to auto-engage Goated-Flash-Free (the embedded free fallback).
    */
   hasGoatedFlash(): boolean {
-    return this.resolveCredential(GOATED_FLASH_ID) === null;
+    if (this._hasCreds) return false; // cached once creds are found
+    const any = this.listAll().some((p) =>
+      p.id !== GOATED_FLASH_ID && this.resolveCredential(p.id) !== null);
+    if (any) this._hasCreds = true;
+    return !any;
   }
+  private _hasCreds = false;
 }

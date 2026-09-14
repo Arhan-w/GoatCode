@@ -11,6 +11,7 @@ import {
   type Provider, type ProviderRegistry,
 } from "./providers.ts";
 import { credentialValid } from "./providers.ts";
+import { GoatedFlashFreeClient, GOATED_FLASH_ID, GEMINI_FREE_MODEL, FLASH_TOOL_INSTRUCTION } from "./gflash.ts";
 
 export class ResolveError extends Error {}
 export class AuthRequired extends ResolveError {
@@ -56,6 +57,19 @@ function headersFor(providerId: string): Record<string, string> | undefined {
 }
 
 export async function resolve(cfg: GoatConfig, registry: ProviderRegistry): Promise<Resolved> {
+  // Goated-Flash-Free: the embedded free fallback. No credentials needed —
+  // the client boots the loopback proxy itself. Explicit, or auto when the
+  // user has zero configured providers.
+  if (cfg.provider === GOATED_FLASH_ID || registry.hasGoatedFlash()) {
+    const flash: Provider = {
+      id: GOATED_FLASH_ID, name: "Goated-Flash-Free", format: "openai",
+      baseUrl: "http://127.0.0.1:8765/v1", auth: "none", models: [GEMINI_FREE_MODEL], custom: false,
+    };
+    cfg.provider = GOATED_FLASH_ID;
+    cfg.modelId = cfg.modelId && cfg.modelId.includes("gemini") ? cfg.modelId : GEMINI_FREE_MODEL;
+    cfg.model = `${GOATED_FLASH_ID}/${cfg.modelId}`;
+    return { provider: flash, credential: { kind: "api_key", apiKey: "free", expiresAt: 0 }, client: new GoatedFlashFreeClient() };
+  }
   const provider = registry.get(cfg.provider);
   if (!provider) throw new UnknownProvider(cfg.provider);
   let cred = registry.resolveCredential(provider.id);

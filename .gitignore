@@ -23,3 +23,4 @@ docs/spike_*
 docs/.renderrepro-home/
 
 .vercel
+src/vendor/**/__pycache__/
