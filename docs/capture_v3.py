@@ -159,6 +159,9 @@ def run_scenario():
         send("/share"); drain(5.0)
     elif SCENARIO == "ultra":
         send("/ultraplan build a tiny CLI tool"); drain(14.0)
+    elif SCENARIO == "flash":
+        send("/index"); drain(6.0)
+        send("what is 12*8"); drain(10.0)
     else:
         drain(7.0)
     try: p.terminate(force=True)
