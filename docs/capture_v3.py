@@ -28,19 +28,26 @@ def run_scenario():
     goat_home = ROOT / "docs" / ".goatdemo-home"
     if goat_home.exists(): shutil.rmtree(goat_home, ignore_errors=True)
     (goat_home / "sessions").mkdir(parents=True)
-    cfg_obj = {
-        "model": "anthropic/claude-sonnet-4-5",
-        "max_tokens": 512,
-        "endpoints": {
-            "anthropic": {
-                "base_url": f"http://127.0.0.1:{PORT}/v1",
-                "format": "openai",
-                "api_key": "demo-key",
-                "models": ["claude-sonnet-4-5"],
+    if SCENARIO == "flash":
+        # NO credentials at all — GoatCode must auto-engage Goated-Flash-Free
+        cfg_obj = {
+            "max_tokens": 512,
+            "repos": [str(ROOT / "docs" / ".goatdemo-proj")],
+        }
+    else:
+        cfg_obj = {
+            "model": "anthropic/claude-sonnet-4-5",
+            "max_tokens": 512,
+            "endpoints": {
+                "anthropic": {
+                    "base_url": f"http://127.0.0.1:{PORT}/v1",
+                    "format": "openai",
+                    "api_key": "demo-key",
+                    "models": ["claude-sonnet-4-5"],
+                },
             },
-        },
-        "repos": [str(ROOT / "docs" / ".goatdemo-proj")],
-    }
+            "repos": [str(ROOT / "docs" / ".goatdemo-proj")],
+        }
     (goat_home / "config.json").write_text(json.dumps(cfg_obj, indent=2), encoding="utf-8")
 
     proj = ROOT / "docs" / ".goatdemo-proj"
@@ -97,10 +104,11 @@ def run_scenario():
     (OUTDIR / "frames.json").unlink(missing_ok=True)
     env = dict(os.environ)
     env["GOATCODE_HOME"] = str(goat_home)
-    env["GOAT_LOG"] = "0"
+    env["GOAT_LOG"] = "1"
     env["TERM"] = "xterm-256color"
     env["FORCE_COLOR"] = "3"
-    env["GOAT_MODEL"] = "anthropic/claude-sonnet-4-5"
+    if SCENARIO != "flash":
+        env["GOAT_MODEL"] = "anthropic/claude-sonnet-4-5"
     env["GOAT_DEMO"] = SCENARIO
     if invite:
         env["GOAT_COLLAB_INVITE"] = invite
@@ -160,8 +168,8 @@ def run_scenario():
     elif SCENARIO == "ultra":
         send("/ultraplan build a tiny CLI tool"); drain(14.0)
     elif SCENARIO == "flash":
-        send("/index"); drain(6.0)
-        send("what is 12*8"); drain(10.0)
+        send("/index"); drain(7.0)
+        send("what is 12*8? answer with just the number"); drain(45.0)
     else:
         drain(7.0)
     try: p.terminate(force=True)

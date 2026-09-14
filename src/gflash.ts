@@ -13,7 +13,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
 import { appDir } from "./config.ts";
 import { FLASH_SERVER_PY } from "./vendor/flashServer.ts";
@@ -64,7 +64,9 @@ function findPython(): string | null {
 }
 
 function ensureServerFile(): string {
-  const dir = join(appDir(), "vendor", "gemini-web2api");
+  // appDir() can be relative (GOATCODE_HOME); the server is spawned with a
+  // temp cwd, so the script path MUST be absolute.
+  const dir = join(resolvePath(appDir()), "vendor", "gemini-web2api");
   mkdirSync(dir, { recursive: true });
   const file = join(dir, "gemini_web2api.py");
   let cur: string | null = null;
@@ -103,7 +105,7 @@ async function startFlashServer(): Promise<string> {
       windowsHide: true,
     });
     proc.on("exit", () => { proc = null; baseUrl = null; });
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 80; i++) {
       await Bun.sleep(250);
       if (await healthy(PORT)) { baseUrl = `http://127.0.0.1:${PORT}/v1`; return baseUrl; }
     }
