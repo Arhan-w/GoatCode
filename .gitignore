@@ -24,3 +24,4 @@ docs/.renderrepro-home/
 
 .vercel
 src/vendor/**/__pycache__/
+release/

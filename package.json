@@ -1,6 +1,6 @@
 {
   "name": "goatcode-cli",
-  "version": "3.0.3",
+  "version": "3.0.1",
   "description": "Every provider. One terminal. Agentic coding CLI with MCP, skills and plugins.",
   "module": "src/index.ts",
   "type": "module",
