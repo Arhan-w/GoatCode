@@ -8,7 +8,7 @@
  * and talks to it over loopback. No API key, no signup, free.
  *
  * Auto-engage: when the user has no provider credentials at all, GoatCode
- * boots on goated-flash/gemini-3.5-flash. /model flash switches to it any
+ * boots on goated-flash/goated-1-flash. /model flash switches to it any
  * time; /model <provider>/<model> switches away.
  */
 import { spawn, type ChildProcess } from "node:child_process";
@@ -22,10 +22,10 @@ import type { ChatClient, StreamEvent, StreamOpts, ToolSpec, Message } from "./l
 
 export const GOATED_FLASH_ID = "goated-flash";
 export const GOATED_FLASH_LABEL = "Goated-Flash-Free";
-export const GEMINI_FREE_MODEL = "gemini-3.5-flash";
-export const GEMINI_FREE_MODELS = [
-  "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash",
-  "gemini-3.5-flash-thinking", "gemini-flash-lite",
+export const FLASH_MODEL = "goated-1-flash";
+export const FLASH_MODELS = [
+  "goated-1-flash", "goated-2-flash", "goated-3-flash",
+  "goated-1-flash-thinking", "goated-flash-lite", "goated-pro", "goated-auto",
 ];
 
 /** Tool-call convention the proxy understands (parsed out of the reply). */
@@ -131,8 +131,8 @@ export class GoatedFlashFreeClient implements ChatClient {
   async *streamChat(messages: Message[], tools: ToolSpec[], opts: StreamOpts): AsyncGenerator<StreamEvent> {
     const base = await startFlashServer();
     const client = makeClient("openai", base, {}) as ChatClient;
-    // the proxy only knows its own model ids; force the flash default
-    opts = { ...opts, model: opts.model.includes("gemini") ? opts.model : GEMINI_FREE_MODEL };
+    // the embedded engine only knows its own model ids; force the default
+    opts = { ...opts, model: FLASH_MODELS.includes(opts.model) ? opts.model : FLASH_MODEL };
     let full = "";
     let emitted = 0;
     // Displayable prefix of the raw text: everything before an OPEN fence, or

@@ -11,7 +11,7 @@ import {
   type Provider, type ProviderRegistry,
 } from "./providers.ts";
 import { credentialValid } from "./providers.ts";
-import { GoatedFlashFreeClient, GOATED_FLASH_ID, GEMINI_FREE_MODEL, FLASH_TOOL_INSTRUCTION } from "./gflash.ts";
+import { GoatedFlashFreeClient, GOATED_FLASH_ID, FLASH_MODEL, FLASH_MODELS, FLASH_TOOL_INSTRUCTION } from "./gflash.ts";
 
 export class ResolveError extends Error {}
 export class AuthRequired extends ResolveError {
@@ -63,10 +63,10 @@ export async function resolve(cfg: GoatConfig, registry: ProviderRegistry): Prom
   if (cfg.provider === GOATED_FLASH_ID || registry.hasGoatedFlash()) {
     const flash: Provider = {
       id: GOATED_FLASH_ID, name: "Goated-Flash-Free", format: "openai",
-      baseUrl: "http://127.0.0.1:8765/v1", auth: "none", models: [GEMINI_FREE_MODEL], custom: false,
+      baseUrl: "http://127.0.0.1:8765/v1", auth: "none", models: [FLASH_MODEL], custom: false,
     };
     cfg.provider = GOATED_FLASH_ID;
-    cfg.modelId = cfg.modelId && cfg.modelId.includes("gemini") ? cfg.modelId : GEMINI_FREE_MODEL;
+    cfg.modelId = FLASH_MODELS.includes(cfg.modelId) ? cfg.modelId : FLASH_MODEL;
     cfg.model = `${GOATED_FLASH_ID}/${cfg.modelId}`;
     return { provider: flash, credential: { kind: "api_key", apiKey: "free", expiresAt: 0 }, client: new GoatedFlashFreeClient() };
   }

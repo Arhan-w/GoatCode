@@ -6,7 +6,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appDir, type CustomEndpoint, type WireFormat } from "./config.ts";
 import catalogData from "./data/providers.json";
-import { GEMINI_FREE_MODEL, GEMINI_FREE_MODELS, GOATED_FLASH_ID, GOATED_FLASH_LABEL } from "./gflash.ts";
+import { FLASH_MODEL, FLASH_MODELS, GOATED_FLASH_ID, GOATED_FLASH_LABEL } from "./gflash.ts";
 export { GOATED_FLASH_ID };
 
 const ENDPOINT_SUFFIXES = [
@@ -186,7 +186,7 @@ export function loadCatalog(): Map<string, Provider> {
   providers.set(GOATED_FLASH_ID, {
     id: GOATED_FLASH_ID, name: GOATED_FLASH_LABEL, format: "openai",
     baseUrl: "http://127.0.0.1:8765/v1", auth: "none",
-    models: GEMINI_FREE_MODELS, custom: false,
+    models: FLASH_MODELS, custom: false,
   });
   return providers;
 }

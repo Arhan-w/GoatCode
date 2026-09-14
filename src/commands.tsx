@@ -335,7 +335,7 @@ export function runSlash(line: string, io: SlashIO): boolean {
       io.push(<Text>  model:  {io.cfg.model} · max_tokens {io.cfg.maxTokens} · auto_approve {String(io.cfg.autoApprove)}</Text>);
       io.push(<Text>  edits:  change the JSON directly, or use /model · /auth · /mcp (they save for you)</Text>);
       if (io.registry.hasGoatedFlash())
-        io.push(<Text dimColor color="#7c8390">  goated-flash: active — free Gemini Web fallback, no key needed</Text>);
+        io.push(<Text dimColor color="#7c8390">  goated-flash: active — Goated-Flash-Free embedded model, no key needed</Text>);
       return true;
     }
 

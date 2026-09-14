@@ -58,7 +58,7 @@ DEFAULT_CONFIG = {
     "gemini_bl": "boq_assistant-bard-web-server_20260716.08_p0",
     "auth_user": None,
     "xsrf_token": None,
-    "default_model": "gemini-3.6-flash",
+    "default_model": "goated-flash",
     "log_requests": True,
     "cookie_file": None,
     "proxy": None,
@@ -106,6 +106,25 @@ MODELS = {
         "desc": "Lightweight fast model",
     },
 }
+
+# ─── Goated aliases (brand-neutral names for the Goated-Flash-Free tier)
+for _ga, _gb in {
+    "goated-flash": "gemini-3.5-flash",
+    "goated-1-flash": "gemini-3.5-flash",
+    "goated-2-flash": "gemini-3.6-flash",
+    "goated-3-flash": "gemini-3.7-flash",
+    "goated-1-flash-thinking": "gemini-3.5-flash-thinking",
+    "goated-flash-lite": "gemini-flash-lite",
+    "goated-pro": "gemini-3.1-pro",
+    "goated-auto": "gemini-auto",
+}.items():
+    if _gb in MODELS:
+        _c = dict(MODELS[_gb])
+        _c["desc"] = _c.get("desc", "").replace("Gemini", "Goated").replace("gemini-", "goated-")
+        MODELS[_ga] = _c
+for _gb in [k for k in MODELS if k.startswith("gemini-")]:
+    del MODELS[_gb]
+
 
 # ─── Utilities ───────────────────────────────────────────────────────────────
 
