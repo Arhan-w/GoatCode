@@ -1,10 +1,10 @@
 <div align="center">
 
-# GoatCode v3.0.1
+# GoatCode v3.1.0
 ### The Autonomous Multi-Repo AI Coding Agent for the Terminal
 
 [![CI](https://github.com/Arhan-w/GoatCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Arhan-w/GoatCode/actions)
-[![Release](https://img.shields.io/github/v/release/Arhan-w/GoatCode?color=a855f7&label=v3.0.1)](https://github.com/Arhan-w/GoatCode/releases)
+[![Release](https://img.shields.io/github/v/release/Arhan-w/GoatCode?color=a855f7&label=v3.1.0)](https://github.com/Arhan-w/GoatCode/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 *Every provider. Multi-repo workspaces. Code intelligence graph. Secure P2P/relay collaboration. Agent-as-a-Service JSON-RPC.*
@@ -21,7 +21,7 @@ GoatCode v3 is a major architectural leap designed for professional developers w
 
 1. **Multi-Repo Workspaces (`workspace.repos`)** — Mount multiple repositories simultaneously, run cross-repo searches (`/find`, `/index`), and enforce per-repo sandboxes and strict permission rule forms.
 2. **Code Intelligence Graph (`src/code`)** — Zero-config tree-sitter parser with WASM fallback supporting TS, JS, Python, and Go. Incremental mtime+size fast path, atomic persistence, and TF-IDF ranked symbol lookup.
-3. **P2P Collaboration Relay (`src/collab`)** — End-to-end encrypted WebSocket relay with Lamport timestamp sequencing, invite codes, turn-tokens, and live peer synchronization.
+3. **P2P Collaboration Relay (`src/collab`)** — End-to-end encrypted WebSocket relay with Lamport timestamp sequencing, invite codes, turn tokens, and live peer synchronization.
 4. **Agent-as-a-Service Protocol (`src/protocol`)** — JSON-RPC 2.0 over HTTP (`POST /rpc`) and WebSocket with constant-time token auth, path-jailed execution, and remote agent mounting (`remote_<name>`).
 5. **Signed Plugin Marketplace (`src/plugins`)** — Secure tar+gzip extractor with path-traversal/bomb guards and ed25519 signature verification against pinned keys.
 6. **Goated-Flash-Free** — Zero-config built-in free tier: when no API key is connected, GoatCode auto-boots an embedded free inference engine, giving you full AI coding out of the box with zero setup.
@@ -77,16 +77,19 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
    npm install -g goatcode-cli
    goat
    ```
+
 2. Add a real provider whenever you want (GoatCode switches to it automatically):
    ```bash
    goat auth openai sk-...
    ```
    Switch models by hand with `/model flash` (back to free) or `/model anthropic/claude-sonnet-4-5`.
+
 3. Build the code index and search symbols:
    ```text
    /index
    /find resolveRepos
    ```
+
 4. Share your session with a teammate:
    ```text
    /share
@@ -116,31 +119,31 @@ Or grab a precompiled binary for Linux, macOS, or Windows from the [Releases Pag
 
 ## Demos
 
-**🎬 Launch reel (48s, vertical):** https://github.com/Arhan-w/GoatCode/releases/download/v3.0.1/reel_final.mp4
+**🎬 Launch reel (52s, vertical):** https://github.com/Arhan-w/GoatCode/releases/download/v3.1.0/reel_enhanced.mp4
 
-![GoatCode v3 — Code Intelligence](docs/assets/demo-code.gif)
+![GoatCode v3.1 — Code Intelligence](docs/assets/demo-code.gif)
 *`/index` builds the workspace code graph, then `/find x` ranks symbols across repos.*
 
-![GoatCode v3 — Collaboration](docs/assets/demo-collab.gif)
+![GoatCode v3.1 — Collaboration](docs/assets/demo-collab.gif)
 *Real-time P2P relay collaboration via invite code — presence, turn tokens, peer chat.*
 
-![GoatCode v3 — Sharing](docs/assets/demo-share.gif)
+![GoatCode v3.1 — Sharing](docs/assets/demo-share.gif)
 *Generate a collab invite code and join a shared workspace session.*
 
-![GoatCode v3 — Goated-Flash-Free](docs/assets/demo-flash.gif)
+![GoatCode v3.1 — Goated-Flash-Free](docs/assets/demo-flash.gif)
 *Zero config: with no API key set, GoatCode auto-boots the embedded Goated-Flash-Free server and answers instantly — free, on loopback.*
 
-![GoatCode v3 — Ultracode fan-out](docs/assets/demo-ultra.gif)
+![GoatCode v3.1 — Ultracode fan-out](docs/assets/demo-ultra.gif)
 *`/ultraplan` decomposes the goal into parallel scouts that fan out via subagents and synthesize one prioritized plan.*
 
 ---
 
 ### Other features
 
-![GoatCode v3 — Failover](docs/assets/demo-failover.gif)
+![GoatCode v3.1 — Failover](docs/assets/demo-failover.gif)
 *Intelligent provider failover: primary 429s, fallback answers on the next port.*
 
-![GoatCode v3 — Read](docs/assets/demo-read.gif)
+![GoatCode v3.1 — Read](docs/assets/demo-read.gif)
 *Streaming agent turn with live tool calls and results.*
 
 ---
@@ -152,19 +155,22 @@ GoatCode is built with clean, modular TypeScript:
 ```tree
 src/
 ├── agent.ts       # Main agent loop & subagent batching
+├── agent-enhanced.ts  # Enhanced agent with ReAct/Plan-and-Execute
 ├── code/          # Tree-sitter AST indexer & symbol ranking
 ├── collab/        # Lamport sync, websocket relay & invite codes
 ├── protocol/      # JSON-RPC 2.0 server & remote agent client
 ├── plugins/       # Signed plugin marketplace & security guards
 ├── tools.ts       # File, search, workspace and shell toolkit
 ├── tui.tsx        # Ink-based TUI with noir theme and streaming
-└── index.ts       # CLI entry point and subcommands
+├── index.ts       # CLI entry point and subcommands
 ```
 
 Run tests locally:
 ```bash
 bun test
 ```
+
+---
 
 ---
 
