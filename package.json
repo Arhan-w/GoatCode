@@ -1,14 +1,13 @@
 {
   "name": "goatcode-cli",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Every provider. One terminal. Agentic coding CLI with MCP, skills and plugins.",
-  "module": "src/index.ts",
-  "type": "module",
   "bin": {
-    "goat": "./src/index.ts"
+    "goat": "./npm-package/bin/goat.js"
   },
   "files": [
-    "src",
+    "npm-package/bin/goat.js",
+    "npm-package/scripts/install-binary.js",
     "README.md",
     "LICENSE"
   ],
@@ -30,11 +29,8 @@
     "llm"
   ],
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun --watch src/index.ts",
-    "test": "bun test",
-    "build": "bun build src/index.ts --outdir dist --target bun",
-    "compile": "bun build src/index.ts --compile --outfile dist/goat"
+    "postinstall": "node ./npm-package/scripts/install-binary.js",
+    "test": "node ./npm-package/bin/goat.js --version"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

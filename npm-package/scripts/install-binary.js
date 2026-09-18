@@ -14,8 +14,8 @@ const path = require("path");
 const https = require("https");
 
 const REPO = "Arhan-w/GoatCode";
-const VERSION = require("../package.json").version; // keep in lock-step with releases
-const PKG_BIN = path.join(__dirname, "..", "bin");
+const VERSION = require("../../package.json").version; // keep in lock-step with releases
+const PKG_BIN = path.join(__dirname, "..", "..", "bin");
 
 function assetName() {
   const osMap = { darwin: "darwin", linux: "linux", win32: "windows" };
