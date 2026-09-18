@@ -122,11 +122,11 @@ export function runSlash(line: string, io: SlashIO): boolean {
             );
           })}
           {rows.length > 40 && <Text dimColor color="#7c8390">  … {rows.length - 40} more</Text>}
-          io.push(<Text dimColor color="#7c8390">  {ready}/{rows.length} configured</Text>);
-          if (io.registry.hasGoatedFlash())
-            io.push(<Text dimColor color="#a855f7">  ⚡ goated-flash: active (free fallback, no key)</Text>);
         </Box>,
       );
+      io.push(<Text dimColor color="#7c8390">  {ready}/{rows.length} configured</Text>);
+      if (io.registry.hasGoatedFlash())
+        io.push(<Text dimColor color="#a855f7">  ⚡ goated-flash: active (free fallback, no key)</Text>);
       return true;
     }
 

@@ -28,7 +28,7 @@ def run_scenario():
     goat_home = ROOT / "docs" / ".goatdemo-home"
     if goat_home.exists(): shutil.rmtree(goat_home, ignore_errors=True)
     (goat_home / "sessions").mkdir(parents=True)
-    if SCENARIO == "flash":
+    if SCENARIO in ("flash", "config"):
         # NO credentials at all — GoatCode must auto-engage Goated-Flash-Free
         cfg_obj = {
             "max_tokens": 512,
@@ -107,7 +107,7 @@ def run_scenario():
     env["GOAT_LOG"] = "0"
     env["TERM"] = "xterm-256color"
     env["FORCE_COLOR"] = "3"
-    if SCENARIO != "flash":
+    if SCENARIO not in ("flash", "config"):
         env["GOAT_MODEL"] = "anthropic/claude-sonnet-4-5"
     env["GOAT_DEMO"] = SCENARIO
     if invite:
@@ -167,6 +167,8 @@ def run_scenario():
         send("/share"); drain(5.0)
     elif SCENARIO == "ultra":
         send("/ultraplan build a tiny CLI tool"); drain(14.0)
+    elif SCENARIO == "config":
+        send("/providers"); drain(5.0)
     elif SCENARIO == "flash":
         send("/index"); drain(7.0)
         send("what is 12*8? answer with just the number"); drain(45.0)

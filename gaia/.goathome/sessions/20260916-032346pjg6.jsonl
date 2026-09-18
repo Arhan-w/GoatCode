@@ -1,0 +1,3 @@
+{"meta":true,"id":"20260916-032346pjg6","cwd":"D:\\GoatCode-ts\\gaia","model":"freellmapi/auto","title":"Reply with exactly the word: UP","createdAt":1789509226.648,"compactedFrom":0,"usage":{"in":1631,"out":26,"cacheRead":0,"cacheWrite":0},"digest":"","turnMarks":[]}
+{"role":"user","content":"Reply with exactly the word: UP"}
+{"role":"assistant","content":"UP"}

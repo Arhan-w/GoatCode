@@ -1,0 +1,16 @@
+{
+  "model": "freellmapi/auto",
+  "max_tokens": 2048,
+  "endpoints": {
+    "freellmapi": {
+      "base_url": "http://127.0.0.1:31415/v1",
+      "format": "openai",
+      "api_key": "freellmapi-a6bec1ab352823c69a0873179a55f026e944a397332993c7",
+      "models": [
+        "auto",
+        "fusion",
+        "claude-opus-4-5"
+      ]
+    }
+  }
+}

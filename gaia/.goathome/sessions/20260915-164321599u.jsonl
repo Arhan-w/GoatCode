@@ -1,0 +1,3 @@
+{"meta":true,"id":"20260915-164321599u","cwd":"D:\\GoatCode-ts\\gaia","model":"goated-flash/goated-1-flash","title":"Reply with exactly: SMOKE OK","createdAt":1789470801.804,"compactedFrom":0,"usage":{"in":0,"out":0,"cacheRead":0,"cacheWrite":0},"digest":"","turnMarks":[]}
+{"role":"user","content":"Reply with exactly: SMOKE OK"}
+{"role":"assistant","content":"SMOKE OK"}

@@ -1,0 +1,658 @@
+[
+  {
+    "word": "every",
+    "start": 0.0,
+    "end": 0.286
+  },
+  {
+    "word": "coding",
+    "start": 0.286,
+    "end": 0.571
+  },
+  {
+    "word": "agent",
+    "start": 0.571,
+    "end": 0.857
+  },
+  {
+    "word": "wants",
+    "start": 0.857,
+    "end": 1.143
+  },
+  {
+    "word": "your",
+    "start": 1.143,
+    "end": 1.429
+  },
+  {
+    "word": "api",
+    "start": 1.429,
+    "end": 1.714
+  },
+  {
+    "word": "key",
+    "start": 1.714,
+    "end": 2.0
+  },
+  {
+    "word": "|",
+    "start": 0.0,
+    "end": 2.0,
+    "gap": true
+  },
+  {
+    "word": "this",
+    "start": 2.5,
+    "end": 2.786
+  },
+  {
+    "word": "one",
+    "start": 2.786,
+    "end": 3.071
+  },
+  {
+    "word": "does",
+    "start": 3.071,
+    "end": 3.357
+  },
+  {
+    "word": "not",
+    "start": 3.357,
+    "end": 3.643
+  },
+  {
+    "word": "even",
+    "start": 3.643,
+    "end": 3.929
+  },
+  {
+    "word": "need",
+    "start": 3.929,
+    "end": 4.214
+  },
+  {
+    "word": "one",
+    "start": 4.214,
+    "end": 4.5
+  },
+  {
+    "word": "|",
+    "start": 2.5,
+    "end": 4.5,
+    "gap": true
+  },
+  {
+    "word": "install",
+    "start": 5.0,
+    "end": 5.333
+  },
+  {
+    "word": "it",
+    "start": 5.333,
+    "end": 5.667
+  },
+  {
+    "word": "type",
+    "start": 5.667,
+    "end": 6.0
+  },
+  {
+    "word": "one",
+    "start": 6.0,
+    "end": 6.333
+  },
+  {
+    "word": "word",
+    "start": 6.333,
+    "end": 6.667
+  },
+  {
+    "word": "goat",
+    "start": 6.667,
+    "end": 7.0
+  },
+  {
+    "word": "|",
+    "start": 5.0,
+    "end": 7.0,
+    "gap": true
+  },
+  {
+    "word": "that",
+    "start": 7.5,
+    "end": 7.9
+  },
+  {
+    "word": "is",
+    "start": 7.9,
+    "end": 8.3
+  },
+  {
+    "word": "the",
+    "start": 8.3,
+    "end": 8.7
+  },
+  {
+    "word": "whole",
+    "start": 8.7,
+    "end": 9.1
+  },
+  {
+    "word": "setup",
+    "start": 9.1,
+    "end": 9.5
+  },
+  {
+    "word": "|",
+    "start": 7.5,
+    "end": 9.5,
+    "gap": true
+  },
+  {
+    "word": "it",
+    "start": 10.0,
+    "end": 10.286
+  },
+  {
+    "word": "boots",
+    "start": 10.286,
+    "end": 10.571
+  },
+  {
+    "word": "straight",
+    "start": 10.571,
+    "end": 10.857
+  },
+  {
+    "word": "into",
+    "start": 10.857,
+    "end": 11.143
+  },
+  {
+    "word": "goated",
+    "start": 11.143,
+    "end": 11.429
+  },
+  {
+    "word": "flash",
+    "start": 11.429,
+    "end": 11.714
+  },
+  {
+    "word": "free",
+    "start": 11.714,
+    "end": 12.0
+  },
+  {
+    "word": "|",
+    "start": 10.0,
+    "end": 12.0,
+    "gap": true
+  },
+  {
+    "word": "a",
+    "start": 12.5,
+    "end": 12.75
+  },
+  {
+    "word": "real",
+    "start": 12.75,
+    "end": 13.0
+  },
+  {
+    "word": "coding",
+    "start": 13.0,
+    "end": 13.25
+  },
+  {
+    "word": "model",
+    "start": 13.25,
+    "end": 13.5
+  },
+  {
+    "word": "built",
+    "start": 13.5,
+    "end": 13.75
+  },
+  {
+    "word": "in",
+    "start": 13.75,
+    "end": 14.0
+  },
+  {
+    "word": "zero",
+    "start": 14.0,
+    "end": 14.25
+  },
+  {
+    "word": "cost",
+    "start": 14.25,
+    "end": 14.5
+  },
+  {
+    "word": "|",
+    "start": 12.5,
+    "end": 14.5,
+    "gap": true
+  },
+  {
+    "word": "ask",
+    "start": 15.0,
+    "end": 15.667
+  },
+  {
+    "word": "it",
+    "start": 15.667,
+    "end": 16.333
+  },
+  {
+    "word": "anything",
+    "start": 16.333,
+    "end": 17.0
+  },
+  {
+    "word": "|",
+    "start": 15.0,
+    "end": 17.0,
+    "gap": true
+  },
+  {
+    "word": "it",
+    "start": 17.5,
+    "end": 17.7
+  },
+  {
+    "word": "reads",
+    "start": 17.7,
+    "end": 17.9
+  },
+  {
+    "word": "your",
+    "start": 17.9,
+    "end": 18.1
+  },
+  {
+    "word": "codebase",
+    "start": 18.1,
+    "end": 18.3
+  },
+  {
+    "word": "writes",
+    "start": 18.3,
+    "end": 18.5
+  },
+  {
+    "word": "files",
+    "start": 18.5,
+    "end": 18.7
+  },
+  {
+    "word": "runs",
+    "start": 18.7,
+    "end": 18.9
+  },
+  {
+    "word": "commands",
+    "start": 18.9,
+    "end": 19.1
+  },
+  {
+    "word": "for",
+    "start": 19.1,
+    "end": 19.3
+  },
+  {
+    "word": "free",
+    "start": 19.3,
+    "end": 19.5
+  },
+  {
+    "word": "|",
+    "start": 17.5,
+    "end": 19.5,
+    "gap": true
+  },
+  {
+    "word": "index",
+    "start": 20.0,
+    "end": 20.286
+  },
+  {
+    "word": "your",
+    "start": 20.286,
+    "end": 20.571
+  },
+  {
+    "word": "repos",
+    "start": 20.571,
+    "end": 20.857
+  },
+  {
+    "word": "find",
+    "start": 20.857,
+    "end": 21.143
+  },
+  {
+    "word": "any",
+    "start": 21.143,
+    "end": 21.429
+  },
+  {
+    "word": "symbol",
+    "start": 21.429,
+    "end": 21.714
+  },
+  {
+    "word": "ranked",
+    "start": 21.714,
+    "end": 22.0
+  },
+  {
+    "word": "|",
+    "start": 20.0,
+    "end": 22.0,
+    "gap": true
+  },
+  {
+    "word": "run",
+    "start": 22.5,
+    "end": 22.75
+  },
+  {
+    "word": "ultraplan",
+    "start": 22.75,
+    "end": 23.0
+  },
+  {
+    "word": "fans",
+    "start": 23.0,
+    "end": 23.25
+  },
+  {
+    "word": "out",
+    "start": 23.25,
+    "end": 23.5
+  },
+  {
+    "word": "a",
+    "start": 23.5,
+    "end": 23.75
+  },
+  {
+    "word": "squad",
+    "start": 23.75,
+    "end": 24.0
+  },
+  {
+    "word": "of",
+    "start": 24.0,
+    "end": 24.25
+  },
+  {
+    "word": "subagents",
+    "start": 24.25,
+    "end": 24.5
+  },
+  {
+    "word": "|",
+    "start": 22.5,
+    "end": 24.5,
+    "gap": true
+  },
+  {
+    "word": "then",
+    "start": 25.0,
+    "end": 25.4
+  },
+  {
+    "word": "merges",
+    "start": 25.4,
+    "end": 25.8
+  },
+  {
+    "word": "one",
+    "start": 25.8,
+    "end": 26.2
+  },
+  {
+    "word": "battle",
+    "start": 26.2,
+    "end": 26.6
+  },
+  {
+    "word": "plan",
+    "start": 26.6,
+    "end": 27.0
+  },
+  {
+    "word": "|",
+    "start": 25.0,
+    "end": 27.0,
+    "gap": true
+  },
+  {
+    "word": "share",
+    "start": 27.5,
+    "end": 27.7
+  },
+  {
+    "word": "a",
+    "start": 27.7,
+    "end": 27.9
+  },
+  {
+    "word": "code",
+    "start": 27.9,
+    "end": 28.1
+  },
+  {
+    "word": "your",
+    "start": 28.1,
+    "end": 28.3
+  },
+  {
+    "word": "teammate",
+    "start": 28.3,
+    "end": 28.5
+  },
+  {
+    "word": "is",
+    "start": 28.5,
+    "end": 28.7
+  },
+  {
+    "word": "inside",
+    "start": 28.7,
+    "end": 28.9
+  },
+  {
+    "word": "your",
+    "start": 28.9,
+    "end": 29.1
+  },
+  {
+    "word": "session",
+    "start": 29.1,
+    "end": 29.3
+  },
+  {
+    "word": "live",
+    "start": 29.3,
+    "end": 29.5
+  },
+  {
+    "word": "|",
+    "start": 27.5,
+    "end": 29.5,
+    "gap": true
+  },
+  {
+    "word": "provider",
+    "start": 30.0,
+    "end": 30.222
+  },
+  {
+    "word": "rate",
+    "start": 30.222,
+    "end": 30.444
+  },
+  {
+    "word": "limits",
+    "start": 30.444,
+    "end": 30.667
+  },
+  {
+    "word": "it",
+    "start": 30.667,
+    "end": 30.889
+  },
+  {
+    "word": "fails",
+    "start": 30.889,
+    "end": 31.111
+  },
+  {
+    "word": "over",
+    "start": 31.111,
+    "end": 31.333
+  },
+  {
+    "word": "before",
+    "start": 31.333,
+    "end": 31.556
+  },
+  {
+    "word": "you",
+    "start": 31.556,
+    "end": 31.778
+  },
+  {
+    "word": "notice",
+    "start": 31.778,
+    "end": 32.0
+  },
+  {
+    "word": "|",
+    "start": 30.0,
+    "end": 32.0,
+    "gap": true
+  },
+  {
+    "word": "plug",
+    "start": 32.5,
+    "end": 32.75
+  },
+  {
+    "word": "in",
+    "start": 32.75,
+    "end": 33.0
+  },
+  {
+    "word": "a",
+    "start": 33.0,
+    "end": 33.25
+  },
+  {
+    "word": "key",
+    "start": 33.25,
+    "end": 33.5
+  },
+  {
+    "word": "later",
+    "start": 33.5,
+    "end": 33.75
+  },
+  {
+    "word": "it",
+    "start": 33.75,
+    "end": 34.0
+  },
+  {
+    "word": "upgrades",
+    "start": 34.0,
+    "end": 34.25
+  },
+  {
+    "word": "instantly",
+    "start": 34.25,
+    "end": 34.5
+  },
+  {
+    "word": "|",
+    "start": 32.5,
+    "end": 34.5,
+    "gap": true
+  },
+  {
+    "word": "or",
+    "start": 35.0,
+    "end": 35.286
+  },
+  {
+    "word": "do",
+    "start": 35.286,
+    "end": 35.571
+  },
+  {
+    "word": "not",
+    "start": 35.571,
+    "end": 35.857
+  },
+  {
+    "word": "it",
+    "start": 35.857,
+    "end": 36.143
+  },
+  {
+    "word": "is",
+    "start": 36.143,
+    "end": 36.429
+  },
+  {
+    "word": "already",
+    "start": 36.429,
+    "end": 36.714
+  },
+  {
+    "word": "goated",
+    "start": 36.714,
+    "end": 37.0
+  },
+  {
+    "word": "|",
+    "start": 35.0,
+    "end": 37.0,
+    "gap": true
+  },
+  {
+    "word": "goat",
+    "start": 37.5,
+    "end": 37.9
+  },
+  {
+    "word": "code",
+    "start": 37.9,
+    "end": 38.3
+  },
+  {
+    "word": "link",
+    "start": 38.3,
+    "end": 38.7
+  },
+  {
+    "word": "in",
+    "start": 38.7,
+    "end": 39.1
+  },
+  {
+    "word": "bio",
+    "start": 39.1,
+    "end": 39.5
+  },
+  {
+    "word": "|",
+    "start": 37.5,
+    "end": 39.5,
+    "gap": true
+  }
+]
