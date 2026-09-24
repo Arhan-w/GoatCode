@@ -1,0 +1,6 @@
+Built GoatCode — an open-source terminal AI agent that works with 180+ providers and boots free with zero config.
+
+One 85MB binary. No API key needed. Just `npm i -g goatcode-cli` and start coding.
+
+Already goated. 🐐
+github.com/arhan-w/goatcode
