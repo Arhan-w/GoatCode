@@ -30,7 +30,7 @@ export const SLASH_COMMANDS = [
   "/mcp", "/skills", "/plugin", "/cost", "/usage", "/context", "/config",
   "/status", "/memory", "/doctor", "/init", "/review", "/ultraplan", "/undo", "/rewind", "/permissions", "/search", "/tasks", "/quit",
   "/peers", "/handoff", "/share", "/leave", "/index", "/find", "/marketplace",
-  "/recover",
+  "/recover", "/fork",
 ];
 
 export interface SlashIO {
@@ -63,7 +63,7 @@ export interface SlashIO {
   collab?: CollabSession | null;
 }
 
-export function runSlash(line: string, io: SlashIO): boolean {
+export async function runSlash(line: string, io: SlashIO): Promise<boolean> {
   const parts = line.trim().split(/\s+/);
   const cmd = parts[0];
   const rest = parts.slice(1);
@@ -221,6 +221,15 @@ export function runSlash(line: string, io: SlashIO): boolean {
           {rows.length === 0 && <Text dimColor color="#7c8390">  (no saved sessions)</Text>}
         </Box>,
       );
+      return true;
+    }
+
+    case "/fork": {
+      const name = rest.join(" ") || undefined;
+      const forked = io.session.fork(name);
+      io.setSession(forked);
+      io.push(<Text color="#4ade80">✓ forked session → {forked.id}</Text>);
+      io.push(<Text dimColor color="#7c8390">  branch: "{forked.title}" · parent: {io.session.subagentForks?.[io.session.subagentForks.length - 1]?.childId ?? "unknown"}</Text>);
       return true;
     }
 
@@ -818,6 +827,7 @@ export const COMMAND_DESC: Record<string, string> = {
   "/peers": "list connected peers", "/handoff": "give the turn to a peer",
   "/marketplace": "browse/install plugins",
   "/recover": "recover pending tool calls from a crashed turn",
+  "/fork": "create a branch from current session (preserves conversation history)",
 };
 
 function descOf(cmd: string): string {

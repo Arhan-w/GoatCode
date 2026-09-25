@@ -164,6 +164,62 @@ export function getEmbeddingModel(): LocalEmbeddingModel {
   return globalModel;
 }
 
+/**
+ * Index codebase into vector index for semantic search.
+ * Builds embeddings for all indexed files using the embedding model.
+ */
+export async function indexCodebase(
+  roots: Map<string, string>,
+  onProgress?: (p: { done: number; total: number }) => void,
+): Promise<void> {
+  const model = getEmbeddingModel();
+  await model.initialize();
+  const vi = new VectorIndex();
+
+  // Gather all source files
+  const candidates: Array<{ key: string; content: string }> = [];
+  for (const [repo, root] of roots) {
+    walkRoot(root, (abs, rel) => {
+      const i = rel.lastIndexOf(".");
+      if (i < 0) return;
+      const ext = rel.slice(i + 1).toLowerCase();
+      const supportedExts = ["ts", "tsx", "js", "jsx", "py", "go", "rs", "java", "c", "cpp", "h", "hpp", "swift", "kt", "rb", "php", "cs"];
+      if (!supportedExts.includes(ext)) return;
+      try {
+        const buf = readFileSync(abs, "utf8");
+        if (buf.length > 5000) return; // skip large files
+        candidates.push({ key: `${repo}/${rel}`, content: buf });
+      } catch { /* skip unreadable */ }
+    });
+  }
+
+  const total = candidates.length;
+  for (let i = 0; i < candidates.length; i++) {
+    const { key, content } = candidates[i];
+    const text = `${key}\n${content}`.slice(0, 500);
+    try {
+      const vector = await model.embed(text);
+      vi.add(key, vector, { repo: key.split("/")[0] });
+    } catch { /* skip on embed failure */ }
+    if (onProgress && i % 50 === 0) {
+      onProgress({ done: i, total });
+    }
+  }
+
+  globalVectorIndex = vi;
+}
+
+/** Global vector index for semantic search across sessions */
+let globalVectorIndex: VectorIndex | null = null;
+
+/** Get or create the global vector index */
+export function getVectorIndex(): VectorIndex {
+  if (!globalVectorIndex) {
+    globalVectorIndex = new VectorIndex();
+  }
+  return globalVectorIndex;
+}
+
 /** Semantic search across indexed files */
 export async function semanticSearch(
   query: string,
@@ -179,4 +235,19 @@ export async function semanticSearch(
     score: r.score,
     symbols: [],
   }));
+}
+
+/** Walk directory recursively (same as indexer.ts walkRoot) */
+import { readFileSync, readdirSync } from "node:fs";
+function walkRoot(root: string, onFile: (abs: string, rel: string) => void): void {
+  let entries;
+  try { entries = readdirSync(root, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      if (e.name.startsWith(".") || e.name === "node_modules" || e.name === ".git") continue;
+      walkRoot(`${root}/${e.name}`, onFile);
+    } else if (e.isFile()) {
+      onFile(`${root}/${e.name}`, `${root}/${e.name}`.replace(root, ""));
+    }
+  }
 }

@@ -10,7 +10,7 @@
  */
 import { Box, Static, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
-import { CommandPalette, type Command } from "./palette.ts";
+import { CommandPalette, type Command } from "./palette.tsx";
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join, relative, resolve as resolvePath } from "node:path";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -25,6 +25,7 @@ import { makeFindTool, FIND_TOOL_SPEC } from "./code/tool.ts";
 import { autoIndexOnce } from "./code/slash.ts";
 import type { Index } from "./code/indexer.ts";
 import { workspaceHash, readIndex } from "./code/indexer.ts";
+import { VirtualList, ScrollableList } from "./virtual-list.tsx";
 
 /** Replace the trailing token (slash line or @token) with the completion. */
 function acceptCompletion(input: string, kind: "slash" | "at", value: string): string {

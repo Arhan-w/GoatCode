@@ -332,7 +332,7 @@ export class Doctor {
 
   private async checkVersion(): Promise<DiagnosticResult> {
     const { VERSION } = await import("./constants.ts");
-    const pkg = await import("../../package.json");
+    const pkg = await import("../package.json");
     const current = (pkg.default?.version ?? VERSION).toString();
     // The version from package.json takes precedence
     const reported = current;

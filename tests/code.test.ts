@@ -356,7 +356,7 @@ describe("find", () => {
         { caller: "B", callee: "C" },
         { caller: "C", callee: "D" },
       ],
-      ["repo/x.ts"],
+      ["x.ts"],
     );
     const results = findSymbols(idx, "A", { limit: 12 });
     expect(Object.fromEntries(results.map((r: any) => [r.name, r.score]))).toEqual({

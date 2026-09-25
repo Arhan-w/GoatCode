@@ -6,24 +6,31 @@
  *   <plugin>/manifest.json        (optional — name/version/description)
  *   <plugin>/commands/<name>.md   frontmatter + $ARGUMENTS body → /name prompt
  *   <plugin>/skills/<name>/SKILL.md   progressive-disclosure skills
+ *   <plugin>/sandbox/            optional sandboxed entry point for untrusted plugins
  *
  * Everything a plugin contributes becomes a SkillDef, so plugin commands
  * and skills flow through the same invocation path (/name, body on demand,
  * listed by /skills) as native ones.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { loadSkills, type SkillDef } from "../skills/loader.ts";
+import { createSandbox, type SandboxConfig, type SandboxResult } from "./sandbox.ts";
 
 export interface PluginManifest {
   name?: string;
   version?: string;
   description?: string;
+  /** If true, plugin commands run in a sandbox (untrusted plugins) */
+  sandboxed?: boolean;
+  /** Sandbox entry point (default: commands/main.ts) */
+  sandboxEntry?: string;
 }
 
 export interface Plugin {
   manifest: PluginManifest;
   dir: string;
+  sandboxed: boolean;
 }
 
 function readManifest(dir: string): Plugin {
@@ -32,7 +39,7 @@ function readManifest(dir: string): Plugin {
   if (existsSync(p)) {
     try { manifest = { name: manifest.name, ...JSON.parse(readFileSync(p, "utf8")) }; } catch { /* keep dir name */ }
   }
-  return { manifest, dir };
+  return { manifest, dir, sandboxed: manifest.sandboxed ?? false };
 }
 
 export function loadPlugins(dirs: string[]): Plugin[] {
@@ -76,3 +83,38 @@ export function pluginSkills(plugins: Plugin[]): SkillDef[] {
   }
   return out;
 }
+
+/**
+ * Execute a sandboxed plugin command via the sandbox runner.
+ * Returns the result as a string (stdout).
+ */
+export async function executeSandboxedPlugin(
+  plugin: Plugin,
+  args: Record<string, unknown>,
+): Promise<SandboxResult> {
+  const entryPoint = plugin.manifest.sandboxEntry ?? join(plugin.dir, "sandbox", "main.ts");
+  if (!existsSync(entryPoint)) {
+    return { ok: false, output: `sandbox entry not found: ${entryPoint}`, exitCode: null, signal: null, durationMs: 0, timedOut: false };
+  }
+
+  // Write args to temp file for the sandbox to read
+  const argsFile = join(plugin.dir, ".sandbox-args.json");
+  try {
+    writeFileSync(argsFile, JSON.stringify(args), "utf8");
+  } catch { /* best effort */ }
+
+  const result = await createSandbox({
+    entryPoint,
+    workDir: plugin.dir,
+    env: { GOAT_PLUGIN_ARGS_FILE: argsFile },
+    timeoutMs: 30_000,
+    onStdout: (data) => process.stdout.write(data),
+    onStderr: (data) => process.stderr.write(data),
+  }).then(() => ({ ok: true, output: "", exitCode: 0, signal: null, durationMs: 0, timedOut: false }));
+
+  // Clean up args file
+  try { unlinkSync(argsFile); } catch { /* ignore */ }
+
+  return result;
+}
+

@@ -129,6 +129,36 @@ export class Session {
     return new Session({ id: newId(), cwd, model });
   }
 
+  /**
+   * Fork this session — creates a new session that shares all messages
+   * up to the current point, allowing branching conversation paths.
+   */
+  fork(name?: string): Session {
+    const forkId = `fork-${newId()}`;
+    const forkedSession = new Session({
+      id: forkId,
+      cwd: this.cwd,
+      model: this.model,
+      messages: [...this.messages],
+      compactedFrom: this.compactedFrom,
+      digest: this.digest,
+      turnMarks: [...this.turnMarks],
+      title: name ?? `${this.title} (branch)`,
+      createdAt: Date.now() / 1000,
+      usage: { ...this.usage },
+    });
+
+    // Record the branch point in parent
+    this.subagentForks.push({
+      childId: forkId,
+      description: name ?? `Branch at ${new Date().toISOString().slice(0, 16)}`,
+      explore: false,
+      startedAt: Date.now(),
+    });
+
+    return forkedSession;
+  }
+
   static loadById(id: string): Session {
     const s = new Session({ id, cwd: process.cwd(), model: "" });
     s.load();
@@ -319,6 +349,22 @@ export interface SessionSummary {
   usage: { in: number; out: number; cacheRead?: number; cacheWrite?: number };
   /** Message-count at the start of each user turn (for /rewind). */
   turnMarks?: number[];
+  /** Parent session ID (if this session was forked from another). */
+  parentId?: string;
+}
+
+/** Session branch metadata — tracks fork relationships */
+export interface SessionBranch {
+  /** Unique ID for this branch point */
+  branchId: string;
+  /** Session ID of the parent */
+  parentId: string;
+  /** Branch name/description */
+  name: string;
+  /** Timestamp when forked */
+  forkedAt: number;
+  /** Number of messages at fork point */
+  forkMessageCount: number;
 }
 
 /** Every stored session's meta line — feeds the cost dashboard. */

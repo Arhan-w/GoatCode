@@ -82,6 +82,12 @@ export class Agent {
   cache: boolean;
   /** Real prompt-token count of the most recent API call (true context size). */
   lastPromptTokens = 0;
+  /** Circuit breaker: tracks consecutive failures per provider to avoid rapid re-failure. */
+  private _circuitBreaker: Map<string, { failures: number; lastFailureTime: number }> = new Map();
+  /** Max consecutive failures before circuit opens (provider is skipped). */
+  static readonly CIRCUIT_BREAKER_THRESHOLD = 3;
+  /** Time window (ms) for counting consecutive failures. */
+  static readonly CIRCUIT_BREAKER_WINDOW_MS = 60_000;
 
   constructor(deps: AgentDeps) {
     this.client = deps.client;
@@ -98,6 +104,46 @@ export class Agent {
     this.disallowedTools = deps.disallowedTools ?? new Set();
     this.fallbacks = deps.fallbacks ? [...deps.fallbacks] : [];
     this.cache = deps.cache ?? false;
+  }
+
+  /** Record a failure for a provider in the circuit breaker. */
+  recordFailure(provider: string): void {
+    const now = Date.now();
+    const state = this._circuitBreaker.get(provider) ?? { failures: 0, lastFailureTime: 0 };
+    // Reset counter if outside the time window
+    if (now - state.lastFailureTime > Agent.CIRCUIT_BREAKER_WINDOW_MS) {
+      state.failures = 1;
+    } else {
+      state.failures += 1;
+    }
+    state.lastFailureTime = now;
+    this._circuitBreaker.set(provider, state);
+  }
+
+  /** Check if a provider's circuit is open (should be skipped). */
+  isCircuitOpen(provider: string): boolean {
+    const state = this._circuitBreaker.get(provider);
+    if (!state) return false;
+    const now = Date.now();
+    if (now - state.lastFailureTime > Agent.CIRCUIT_BREAKER_WINDOW_MS) return false;
+    return state.failures >= Agent.CIRCUIT_BREAKER_THRESHOLD;
+  }
+
+  /** Reset circuit breaker for a provider (called on success). */
+  resetCircuit(provider: string): void {
+    this._circuitBreaker.delete(provider);
+  }
+
+  /** Get circuit breaker stats for display. */
+  getCircuitBreakerStats(): Array<{ provider: string; failures: number; open: boolean }> {
+    const now = Date.now();
+    const result: Array<{ provider: string; failures: number; open: boolean }> = [];
+    for (const [provider, state] of this._circuitBreaker) {
+      const isOpen = now - state.lastFailureTime <= Agent.CIRCUIT_BREAKER_WINDOW_MS &&
+        state.failures >= Agent.CIRCUIT_BREAKER_THRESHOLD;
+      result.push({ provider, failures: state.failures, open: isOpen });
+    }
+    return result;
   }
 
   private messages(): Message[] {
@@ -299,6 +345,12 @@ export class Agent {
             let switched = false;
             while (this.fallbacks.length) {
               const fb = this.fallbacks.shift()!;
+              // Extract provider ID from model string (format: "provider/model")
+              const fbProvider = fb.model.split("/")[0];
+              // Skip if circuit is open for this provider
+              if (this.isCircuitOpen(fbProvider)) {
+                continue;
+              }
               try {
                 for await (const ev of this.streamOnce(signal, undefined, fb.client, fb.model)) {
                   if (ev.kind === "text" || ev.kind === "thinking" || ev.kind === "tool_calls") {
@@ -306,6 +358,7 @@ export class Agent {
                       switched = true;
                       this.client = fb.client;
                       this.session.model = fb.model;
+                      this.resetCircuit(fbProvider); // Success — reset circuit
                       yield { kind: "fallback", from, to: fb.model, reason };
                     }
                   }
@@ -313,6 +366,7 @@ export class Agent {
                 }
                 if (switched) return; // stream completed on the fallback
               } catch (fe: any) {
+                this.recordFailure(fbProvider); // Record failure in circuit breaker
                 if (switched) {
                   // already streamed partial output here — re-falling-back would
                   // duplicate it; surface the error instead (Claude semantics)

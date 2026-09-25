@@ -27,9 +27,12 @@ export interface IndexEdge {
   file: string;
   line: number;
 }
+import type { VectorIndex } from "./semantic.ts";
+
 export interface Index {
   files: Record<string, IndexFile>;
   edges: IndexEdge[];
+  vectorIndex?: VectorIndex;
 }
 
 export interface IndexProgress {
