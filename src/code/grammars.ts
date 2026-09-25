@@ -1,9 +1,12 @@
 /** Extension → tree-sitter grammar name map. */
 export const EXT_GRAMMAR: Record<string, string> = {
+  // web
   ts: "tsx",
   tsx: "tsx",
   js: "javascript",
   jsx: "javascript",
+  vue: "vue",
+  // systems
   py: "python",
   go: "go",
   rs: "rust",
@@ -16,6 +19,21 @@ export const EXT_GRAMMAR: Record<string, string> = {
   cs: "c_sharp",
   rb: "ruby",
   php: "php",
+  // shell / scripting
+  sh: "bash",
+  bash: "bash",
+  zsh: "bash",
+  fish: "bash",
+  // data / infra
+  sql: "sql",
+  mysql: "sql",
+  psql: "sql",
+  hcl: "hcl",
+  tf: "hcl",
+  proto: "proto",
+  protodevel: "proto",
+  graphql: "graphql",
+  gql: "graphql",
 };
 
 const WASM_SUBDIR = "tree-sitter-wasms/out";

@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { appDir, type CustomEndpoint, type WireFormat } from "./config.ts";
 import catalogData from "./data/providers.json";
 import { FLASH_MODEL, FLASH_MODELS, GOATED_FLASH_ID, GOATED_FLASH_LABEL } from "./gflash.ts";
+import { ProviderError, RateLimitError, ValidationError, AuthError } from "./errors.ts";
+import { RateLimiterConfig, TokenBucketRateLimiter, RateLimiterRegistry } from "./rate-limiter.ts";
 export { GOATED_FLASH_ID };
 
 const ENDPOINT_SUFFIXES = [
@@ -250,21 +252,81 @@ export class CredentialStore {
 }
 
 export class ProviderRegistry {
-  catalog: Map<string, Provider>;
-  custom: Record<string, CustomEndpoint>;
+  private _catalog: Map<string, Provider> | null = null;
+  private _endpoints: Map<string, CustomEndpoint>;
+  private _loading: Promise<void> | null = null;
   store: CredentialStore;
 
   constructor(customEndpoints: Record<string, CustomEndpoint> = {}, store?: CredentialStore) {
-    this.catalog = loadCatalog();
-    this.custom = { ...customEndpoints };
+    this._endpoints = new Map(Object.entries(customEndpoints));
     this.store = store ?? new CredentialStore();
-    for (const [pid, ep] of Object.entries(this.custom)) {
-      this.catalog.set(pid, {
-        id: pid, name: ep.label || pid, format: ep.format,
-        baseUrl: normalizeBaseUrl(ep.baseUrl), auth: "apikey",
-        models: ep.models, custom: true,
-      });
+  }
+
+  /** Load catalog lazily on first access */
+  private async ensureLoaded(): Promise<void> {
+    if (this._catalog) return;
+    if (this._loading) return this._loading;
+
+    this._loading = (async () => {
+      try {
+        const data = loadCatalog();
+        this._catalog = new Map(data.entries());
+      } catch (e) {
+        console.warn('Failed to load provider catalog:', e);
+        this._catalog = new Map();
+      } finally {
+        this._loading = null;
+      }
+    })();
+
+    return this._loading;
+  }
+
+  async getProvider(id: string): Promise<Provider | undefined> {
+    await this.ensureLoaded();
+    const ep = this._endpoints.get(id);
+    if (ep) {
+      return { id, baseUrl: ep.baseUrl, format: ep.format, label: ep.label, models: ep.models };
     }
+    return this._catalog?.get(id);
+  }
+
+  async listProviders(): Promise<Provider[]> {
+    await this.ensureLoaded();
+    const eps = [...this._endpoints.entries()].map(([id, ep]) => ({
+      id, baseUrl: ep.baseUrl, format: ep.format, label: ep.label, models: ep.models
+    }));
+    const builtins = this._catalog ? [...this._catalog.values()] : [];
+    return [...eps, ...builtins];
+  }
+
+  /** Preload catalog for CLI commands that need full list */
+  async preload(): Promise<void> {
+    await this.ensureLoaded();
+  }
+
+  get catalogLoaded(): boolean {
+    return this._catalog !== null;
+  }
+
+  // Backwards-compatible sync getters (for code that hasn't been migrated yet)
+  get catalog(): Map<string, Provider> {
+    if (!this._catalog) {
+      // Eager load as fallback for sync access
+      this._catalog = loadCatalog();
+      for (const [pid, ep] of this._endpoints.entries()) {
+        this._catalog.set(pid, {
+          id: pid, name: ep.label || pid, format: ep.format,
+          baseUrl: normalizeBaseUrl(ep.baseUrl), auth: "apikey",
+          models: ep.models, custom: true,
+        });
+      }
+    }
+    return this._catalog;
+  }
+
+  get custom(): Record<string, CustomEndpoint> {
+    return Object.fromEntries(this._endpoints);
   }
 
   get(providerId: string): Provider | undefined {
@@ -314,3 +376,22 @@ export class ProviderRegistry {
   }
   private _hasCreds = false;
 }
+
+// Default rate limits per provider (rpm, tpm, burst).
+// Keys must match catalog provider IDs.
+export const PROVIDER_RATE_LIMITS: Record<string, RateLimiterConfig> = {
+  claude:         { rpm: 30,  tpm: 60_000,  burst: 10 },
+  openai:         { rpm: 60,  tpm: 120_000, burst: 20 },
+  anthropic:      { rpm: 30,  tpm: 60_000,  burst: 10 },
+  gemini:         { rpm: 60,  tpm: 120_000, burst: 20 },
+  openrouter:     { rpm: 60,  tpm: 120_000, burst: 20 },
+  perplexity:     { rpm: 60,  tpm: 120_000, burst: 20 },
+  groq:           { rpm: 30,  tpm: 60_000,  burst: 10 },
+  fireworks:      { rpm: 30,  tpm: 60_000,  burst: 10 },
+  mistral:        { rpm: 30,  tpm: 60_000,  burst: 10 },
+  cohere:         { rpm: 30,  tpm: 60_000,  burst: 10 },
+  deepseek:       { rpm: 30,  tpm: 60_000,  burst: 10 },
+  "cloudflare-ai": { rpm: 30, tpm: 60_000,  burst: 10 },
+  vertex:         { rpm: 60,  tpm: 120_000, burst: 20 },
+  nvidia:         { rpm: 60,  tpm: 120_000, burst: 20 },
+};

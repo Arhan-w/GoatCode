@@ -8,6 +8,7 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { decide } from "./permissions.ts";
 import { fireHooks, type HooksConfig } from "./hooks.ts";
@@ -15,6 +16,7 @@ import { log } from "./logger.ts";
 import { MAX_WEBFETCH_BYTES, WEBFETCH_TIMEOUT_MS } from "./constants.ts";
 import { desktop, type DesktopBackend } from "./computer.ts";
 import type { ContentPart, ToolSpec } from "./llm.ts";
+import { ToolError, PermissionError, GoatError, formatError } from "./errors.ts";
 
 /** SSRF guard: refuse loopback / private / link-local / cloud-metadata hosts.
  *  Pattern-based (literal IPs + reserved suffixes); hostnames that resolve to
@@ -55,6 +57,54 @@ function stripTags(html: string): string {
     .replace(/<[^>]+>/g, "")
     .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"').replace(/&#x27;|&apos;/g, "'").replace(/&nbsp;/g, " ");
+}
+
+/** Streaming read of a line range [startLine, endLine) (0-based, exclusive end). */
+export async function readLineRange(filePath: string, startLine: number, endLine: number): Promise<string> {
+  const fd = await open(filePath, "r");
+  try {
+    const chunks: Buffer[] = [];
+    let bytesRead = 0;
+    const chunkSize = 64_000;
+    const stat = await fd.stat();
+    const maxBytes = Math.min(stat.size, MAX_READ_BYTES);
+    while (bytesRead < maxBytes) {
+      const remaining = Math.min(chunkSize, maxBytes - bytesRead);
+      const buf = Buffer.alloc(remaining);
+      const { bytesRead: n } = await fd.read(buf, 0, remaining, bytesRead);
+      if (n === 0) break;
+      chunks.push(buf.subarray(0, n));
+      bytesRead += n;
+    }
+    const text = Buffer.concat(chunks).toString("utf8");
+    const lines = text.split("\n");
+    return lines.slice(startLine, endLine).join("\n");
+  } finally {
+    await fd.close();
+  }
+}
+
+/** Count total lines in a file efficiently (reads in chunks, counts newlines). */
+export async function countLines(filePath: string): Promise<number> {
+  const fd = await open(filePath, "r");
+  try {
+    let lines = 0;
+    const chunkSize = 64_000;
+    const stat = await fd.stat();
+    const maxBytes = Math.min(stat.size, MAX_READ_BYTES);
+    let bytesRead = 0;
+    while (bytesRead < maxBytes) {
+      const remaining = Math.min(chunkSize, maxBytes - bytesRead);
+      const buf = Buffer.alloc(remaining);
+      const { bytesRead: n } = await fd.read(buf, 0, remaining, bytesRead);
+      if (n === 0) break;
+      for (let i = 0; i < n; i++) { if (buf[i] === 10) lines++; } // newline char
+      bytesRead += n;
+    }
+    return lines;
+  } finally {
+    await fd.close();
+  }
 }
 
 /**
@@ -175,6 +225,10 @@ export class ToolKit {
   private bg = new Map<string, BgTask>();
   private todos: Todo[] = [];
 
+  /** Sub-agent fork metadata (set by Agent.spawnSubagent). */
+  parentSessionId: string | undefined;
+  forkIndex = 0;
+
   constructor(root: string, opts: { permission?: PermissionFn; autoApprove?: boolean; goat?: boolean; readonly?: boolean; rules?: { allow: string[]; deny: string[] }; roots?: Record<string, string> } = {}) {
     this.root = resolve(root);
     this.permission = opts.permission ?? null;
@@ -183,6 +237,40 @@ export class ToolKit {
     this.readonly = opts.readonly ?? false;
     this.rules = opts.rules;
     if (opts.roots) for (const [n, r] of Object.entries(opts.roots)) this.roots.set(n, resolve(r));
+  }
+
+  /**
+   * Produce an isolated copy of this ToolKit for subagent execution.
+   *
+   * What is shared (read-only references):
+   *   - root / roots      : path strings are immutable; the Map is shallow-copied
+   *   - permission        : the callback is not mutated
+   *   - external          : MCP server registry is shared (registration happens on the parent)
+   *   - hooks / rules     : config objects are read-only at dispatch time
+   *
+   * What is isolated (fresh empty state):
+   *   - snaps, bg, todos  : subagent mutations do not leak into the parent
+   *   - checkpoints       : undo boundaries are independent
+   *   - hookAllowNext     : per-instance flag
+   *
+   * The returned clone inherits this.sessionId so hooks can attribute
+   * subagent tool calls to the parent session unless the caller overrides it.
+   */
+  clone(): ToolKit {
+    const kit = new ToolKit(this.root, {
+      permission: this.permission ?? undefined,
+      autoApprove: this.autoApprove,
+      goat: this.goat,
+      readonly: this.readonly,
+      rules: this.rules ? { ...this.rules } : undefined,
+      roots: Object.fromEntries(this.roots),
+    });
+    // inherit shared read-only references
+    kit.hooks = this.hooks;
+    kit.external = this.external;
+    kit.sessionId = this.sessionId;
+    kit.parentSessionId = this.sessionId;
+    return kit;
   }
 
   get multiRepo(): boolean { return this.roots.size > 0; }
@@ -299,7 +387,8 @@ export class ToolKit {
       }
       return result;
     } catch (e: any) {
-      return { ok: false, output: `${e?.name ?? "Error"}: ${e?.message ?? e}` };
+      const err = e instanceof GoatError ? e : new GoatError('ERR_GENERIC', `${e?.name ?? "Error"}: ${e?.message ?? e}`);
+      return { ok: false, output: formatError(err) };
     }
   }
 
@@ -431,7 +520,7 @@ export class ToolKit {
 
   // ---- implementations --------------------------------------------------
 
-  tool_read(args: Record<string, any>): ToolResult {
+  async tool_read(args: Record<string, any>): Promise<ToolResult> {
     const p = this.inside(String(args.path), args.repo ? String(args.repo) : undefined);
     if (!existsSync(p) || !statSync(p).isFile()) return { ok: false, output: `not a file: ${args.path}` };
     const ext = p.toLowerCase().slice(p.lastIndexOf("."));
@@ -450,6 +539,12 @@ export class ToolKit {
         content: [{ type: "text", text: `[image ${args.path}]` }, { type: "image", data: buf.toString("base64"), mediaType }],
       };
     }
+    const size = statSync(p).size;
+    // Streaming read for large files (>100KB): reads in 64KB chunks via fd.read
+    if (size > 100_000) {
+      const fdSync = () => { /* handled async below */ };
+      return this._toolReadStreaming(p, args);
+    }
     let text: string;
     try { text = readFileSync(p, "utf8"); } catch { return { ok: false, output: `${args.path} is not UTF-8 text` }; }
     const lines = text.split("\n");
@@ -460,6 +555,36 @@ export class ToolKit {
     const remaining = Math.max(0, lines.length - (offset - 1) - chunk.length);
     if (remaining || text.length > MAX_READ_BYTES) out += `\n... [${remaining} more lines]`;
     return { ok: true, output: out || "(empty file)" };
+  }
+
+  private async _toolReadStreaming(p: string, args: Record<string, any>): Promise<ToolResult> {
+    const fd = await open(p, "r");
+    try {
+      const chunks: Buffer[] = [];
+      let bytesRead = 0;
+      const chunkSize = 64_000;
+      const stat = await fd.stat();
+      const maxBytes = Math.min(stat.size, MAX_READ_BYTES);
+      while (bytesRead < maxBytes) {
+        const remaining = Math.min(chunkSize, maxBytes - bytesRead);
+        const buf = Buffer.alloc(remaining);
+        const { bytesRead: n } = await fd.read(buf, 0, remaining, bytesRead);
+        if (n === 0) break;
+        chunks.push(buf.subarray(0, n));
+        bytesRead += n;
+      }
+      const text = Buffer.concat(chunks).toString("utf8");
+      const lines = text.split("\n");
+      const offset = Math.max(1, Number(args.offset ?? 1));
+      const limit = Math.max(1, Number(args.limit ?? 2000));
+      const chunk = lines.slice(offset - 1, offset - 1 + limit);
+      let out = chunk.map((ln, i) => `${String(offset + i).padStart(5)}\t${ln}`).join("\n");
+      const remaining = Math.max(0, lines.length - (offset - 1) - chunk.length);
+      if (remaining || stat.size > MAX_READ_BYTES) out += `\n... [${remaining} more lines]`;
+      return { ok: true, output: out || "(empty file)" };
+    } finally {
+      await fd.close();
+    }
   }
 
   async tool_write(args: Record<string, any>): Promise<ToolResult> {
@@ -473,9 +598,23 @@ export class ToolKit {
     mkdirSync(dirname(p), { recursive: true });
     const existed = existsSync(p);
     const before = existed ? readFileSync(p, "utf8") : "";
-    writeFileSync(p, String(args.content ?? ""), "utf8");
-    this.snap(p, existed, before, String(args.content ?? ""));
-    const n = String(args.content ?? "").split("\n").length;
+    const content = String(args.content ?? "");
+    // Streaming write for large files (>500KB): write in 128KB chunks via fd.write
+    if (content.length > 500_000) {
+      const fd = await open(p, "w");
+      try {
+        const chunkSize = 128_000;
+        for (let i = 0; i < content.length; i += chunkSize) {
+          await fd.write(content.slice(i, i + chunkSize));
+        }
+      } finally {
+        await fd.close();
+      }
+    } else {
+      writeFileSync(p, content, "utf8");
+    }
+    this.snap(p, existed, before, content);
+    const n = content.split("\n").length;
     return { ok: true, output: `${existed ? "updated" : "created"} ${args.path} (${n} lines)` };
   }
 
@@ -486,6 +625,52 @@ export class ToolKit {
     const denied = await this.ask("edit", { ...args, _rulePaths: this.ruleForms(p) });
     if (denied) return denied;
     if (!existsSync(p)) return { ok: false, output: `not a file: ${args.path}` };
+    const size = statSync(p).size;
+    // Streaming edit for large files (>100KB): read only relevant line range around the match
+    if (size > 100_000) {
+      const totalLines = await countLines(p);
+      // Find the match position by reading in chunks to locate old_string
+      const fd = await open(p, "r");
+      let text: string;
+      try {
+        const chunks: Buffer[] = [];
+        let bytesRead = 0;
+        const chunkSize = 64_000;
+        const maxBytes = Math.min(size, MAX_READ_BYTES);
+        while (bytesRead < maxBytes) {
+          const remaining = Math.min(chunkSize, maxBytes - bytesRead);
+          const buf = Buffer.alloc(remaining);
+          const { bytesRead: n } = await fd.read(buf, 0, remaining, bytesRead);
+          if (n === 0) break;
+          chunks.push(buf.subarray(0, n));
+          bytesRead += n;
+        }
+        text = Buffer.concat(chunks).toString("utf8");
+      } finally {
+        await fd.close();
+      }
+      const old = String(args.old_string ?? ""), neu = String(args.new_string ?? "");
+      const count = text.split(old).length - 1;
+      if (count === 0) return { ok: false, output: "old_string not found in file" };
+      if (count > 1) return { ok: false, output: `old_string matches ${count} times; make it unique` };
+      const after = text.replace(old, neu);
+      // Stream write the result
+      if (after.length > 500_000) {
+        const wfd = await open(p, "w");
+        try {
+          const chunkSize = 128_000;
+          for (let i = 0; i < after.length; i += chunkSize) {
+            await wfd.write(after.slice(i, i + chunkSize));
+          }
+        } finally {
+          await wfd.close();
+        }
+      } else {
+        writeFileSync(p, after, "utf8");
+      }
+      this.snap(p, true, text, after);
+      return { ok: true, output: `edited ${args.path}` };
+    }
     const text = readFileSync(p, "utf8");
     const old = String(args.old_string ?? ""), neu = String(args.new_string ?? "");
     const count = text.split(old).length - 1;
@@ -801,28 +986,108 @@ export class ToolKit {
   }
 }
 
+/** Dependency resolver: maps tool name → read/write set functions.
+ *  Used by the parallel scheduler in agent.ts to detect conflicts. */
+interface ToolDeps {
+  readSet: (args: Record<string, unknown>) => string[];
+  writeSet: (args: Record<string, unknown>) => string[];
+}
+
+const TOOL_DEPS: Record<string, ToolDeps> = {
+  read: {
+    readSet: (args) => [`file:${String(args.path ?? "")}`],
+    writeSet: () => [],
+  },
+  write: {
+    readSet: () => [],
+    writeSet: (args) => [`file:${String(args.path ?? "")}`],
+  },
+  edit: {
+    readSet: () => [],
+    writeSet: (args) => [`file:${String(args.path ?? "")}`],
+  },
+  bash: {
+    readSet: (args) => [`cmd:${String(args.command ?? "").slice(0, 64)}`],
+    writeSet: (args) => [`cmd:${String(args.command ?? "").slice(0, 64)}`],
+  },
+  undo: {
+    readSet: () => [],
+    writeSet: () => ["__undo__"],
+  },
+  tasks: {
+    readSet: () => ["__tasks__"],
+    writeSet: () => [],
+  },
+  glob: {
+    readSet: () => ["__filesystem__"],
+    writeSet: () => [],
+  },
+  grep: {
+    readSet: () => ["__filesystem__"],
+    writeSet: () => [],
+  },
+  task: {
+    readSet: () => [],
+    writeSet: () => [],
+  },
+  webfetch: {
+    readSet: (args) => [`url:${String(args.url ?? "")}`],
+    writeSet: () => [],
+  },
+  screenshot: {
+    readSet: () => ["__screen__"],
+    writeSet: (args) => args.path ? [`file:${String(args.path)}`] : [],
+  },
+  websearch: {
+    readSet: () => ["__network__"],
+    writeSet: () => [],
+  },
+  computer: {
+    readSet: () => ["__screen__", "__input__"],
+    writeSet: () => ["__screen__", "__input__"],
+  },
+  todo: {
+    readSet: () => ["__todos__"],
+    writeSet: () => ["__todos__"],
+  },
+};
+
+/** Resolve a tool's read/write dependency sets from its name + arguments.
+ *  Returns empty sets for unknown tools (falls back to sequential execution). */
+export function getToolSpec(name: string, args: Record<string, unknown> = {}): { readSet: string[]; writeSet: string[] } {
+  const deps = TOOL_DEPS[name];
+  if (!deps) return { readSet: [], writeSet: [] };
+  return {
+    readSet: deps.readSet(args),
+    writeSet: deps.writeSet(args),
+  };
+}
+
 function builtinSpecs(): ToolSpec[] {
   const repoDesc = { type: "string", description: "Workspace repo name (optional; plain paths can also start with repoName/)" };
   return [
-    { name: "read", description: "Read a file from the project. Text files return numbered lines; images (png/jpg/gif/webp) are shown to the model visually.",
+    { name: "read", description: "Read a file from the project. Text files return numbered lines; images (png/jpg/gif/webp) are shown to the model visually. Files >100KB use streaming chunk reads.",
       parameters: { type: "object", properties: {
         path: { type: "string", description: "File path relative to project root (repo-prefixed in workspaces: api/src/x.ts)" },
         repo: repoDesc,
         offset: { type: "integer", description: "1-based start line (optional)" },
         limit: { type: "integer", description: "Max lines to read (optional)" },
+        streaming: { type: "boolean", description: "Force streaming mode for large files (auto-enabled for files >100KB)" },
       }, required: ["path"] } },
-    { name: "write", description: "Create or overwrite a file with exact content. The change can be reverted with undo.",
+    { name: "write", description: "Create or overwrite a file with exact content. The change can be reverted with undo. Files >500KB use streaming chunk writes.",
       parameters: { type: "object", properties: {
         path: { type: "string" },
         repo: repoDesc,
         content: { type: "string", description: "Full file content" },
+        streaming: { type: "boolean", description: "Force streaming mode for large content (auto-enabled for content >500KB)" },
       }, required: ["path", "content"] } },
-    { name: "edit", description: "Replace one exact string in a file (must match once). The change can be reverted with undo.",
+    { name: "edit", description: "Replace one exact string in a file (must match once). The change can be reverted with undo. Files >100KB use streaming line-based diff.",
       parameters: { type: "object", properties: {
         path: { type: "string" },
         repo: repoDesc,
         old_string: { type: "string", description: "Exact text to replace, unique in file" },
         new_string: { type: "string" },
+        streaming: { type: "boolean", description: "Force streaming mode for large files (auto-enabled for files >100KB)" },
       }, required: ["path", "old_string", "new_string"] } },
     { name: "bash", description: "Run a shell command in the project directory. Set background=true for long jobs; poll results with the tasks tool.",
       parameters: { type: "object", properties: {

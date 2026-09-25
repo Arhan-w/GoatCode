@@ -22,6 +22,7 @@ import { runCodeSlash } from "./code/slash.ts";
 import { installPlugin, listInstalled, removePlugin, updatePlugin, searchPlugins, parseGoatUri, DEFAULT_REGISTRY_URL } from "./plugins/marketplace.ts";
 import { resolveRepos } from "./config.ts";
 import { ULTRACODE_FANOUT } from "./constants.ts";
+import { runDoctor } from "./doctor.ts";
 
 export const SLASH_COMMANDS = [
   "/help", "/model", "/models", "/providers", "/auth", "/logout",
@@ -29,6 +30,7 @@ export const SLASH_COMMANDS = [
   "/mcp", "/skills", "/plugin", "/cost", "/usage", "/context", "/config",
   "/status", "/memory", "/doctor", "/init", "/review", "/ultraplan", "/undo", "/rewind", "/permissions", "/search", "/tasks", "/quit",
   "/peers", "/handoff", "/share", "/leave", "/index", "/find", "/marketplace",
+  "/recover",
 ];
 
 export interface SlashIO {
@@ -77,6 +79,20 @@ export function runSlash(line: string, io: SlashIO): boolean {
     case "/help":
       io.push(<HelpList />);
       return true;
+
+    case "/doctor": {
+      const fix = rest.includes("--fix");
+      const json = rest.includes("--json");
+      const exitCode = await runDoctor(fix, json);
+      if (exitCode === 2) {
+        io.push(<Text color="#f87171">✗ Some checks failed</Text>);
+      } else if (exitCode === 1) {
+        io.push(<Text color="#fbbf24">⚠ Some warnings</Text>);
+      } else {
+        io.push(<Text color="#4ade80">✓ All checks passed</Text>);
+      }
+      return true;
+    }
 
     case "/model": {
       if (!arg) {
@@ -585,6 +601,19 @@ export function runSlash(line: string, io: SlashIO): boolean {
       return true;
     }
 
+    case "/recover": {
+      const recovery = await io.session.recover();
+      if (recovery.recovered) {
+        io.push(<Text color="#4ade80">✓ recovered {recovery.tools.length} pending tool call(s) from last turn</Text>);
+        for (const tool of recovery.tools) {
+          await io.runTurn(`${tool.tool}(${JSON.stringify(tool.args)})`);
+        }
+      } else {
+        io.push(<Text dimColor color="#7c8390">  no pending work to recover</Text>);
+      }
+      return true;
+    }
+
     case "/index":
     case "/find": {
       void runCodeSlash(line, {
@@ -788,6 +817,7 @@ export const COMMAND_DESC: Record<string, string> = {
   "/share": "invite into this session (relay)", "/leave": "leave the collab session",
   "/peers": "list connected peers", "/handoff": "give the turn to a peer",
   "/marketplace": "browse/install plugins",
+  "/recover": "recover pending tool calls from a crashed turn",
 };
 
 function descOf(cmd: string): string {

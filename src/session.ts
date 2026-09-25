@@ -6,6 +6,24 @@ import { join } from "node:path";
 import { appDir } from "./config.ts";
 import type { Message, ToolCall } from "./llm.ts";
 import { textOf } from "./llm.ts";
+import { SessionError } from "./errors.ts";
+
+export interface SubagentFork {
+  childId: string;
+  description: string;
+  explore: boolean;
+  startedAt: number;
+  completedAt?: number;
+  stepsUsed?: number;
+  error?: string;
+}
+
+export interface SnapRecord {
+  path: string;
+  before: string;
+  after: string;
+  turnIndex: number;
+}
 
 export interface SessionData {
   id: string;
@@ -20,6 +38,19 @@ export interface SessionData {
   compactedFrom: number;
   /** Model-written (or digest-fallback) summary of everything before compactedFrom. */
   digest: string;
+  /** Subagent fork metadata: tracks child sessions spawned from this one. */
+  subagentForks?: SubagentFork[];
+  /** Crash recovery marker: set at turn start, cleared on successful completion. */
+  crashRecoveryMarker?: {
+    turnIndex: number;
+    startedAt: number;
+    pendingTools: Array<{ tool: string; args: any; callId: string }>;
+  };
+  /** Tool state snapshots for crash recovery. */
+  toolState?: {
+    snapshots: SnapRecord[];
+    completedTurns: number;
+  };
 }
 
 function sessionsDir(): string {
@@ -48,6 +79,21 @@ export class Session {
   digest = "";
   /** Message-count at the start of each user turn (drives /rewind). */
   turnMarks: number[] = [];
+  /** Subagent fork metadata: child sessions spawned from this parent. */
+  subagentForks: SubagentFork[] = [];
+  /** Crash recovery marker: set at turn start, cleared on successful completion. */
+  crashRecoveryMarker?: {
+    turnIndex: number;
+    startedAt: number;
+    pendingTools: Array<{ tool: string; args: any; callId: string }>;
+  };
+  /** Tool state snapshots for crash recovery. */
+  toolState: { snapshots: SnapRecord[]; completedTurns: number } = { snapshots: [], completedTurns: 0 };
+
+  // Append-only save thresholds
+  private _saveCount = 0;
+  private static readonly COMPACT_THRESHOLD = 500; // messages
+  private static readonly COMPACT_SIZE_THRESHOLD = 1_000_000; // bytes
 
   constructor(init: Partial<SessionData> & { id: string; cwd: string; model: string }) {
     this.id = init.id;
@@ -61,6 +107,22 @@ export class Session {
     this.usage = { in: u.in ?? 0, out: u.out ?? 0, cacheRead: u.cacheRead ?? 0, cacheWrite: u.cacheWrite ?? 0 };
     this.digest = init.digest ?? "";
     this.turnMarks = Array.isArray(init.turnMarks) ? init.turnMarks : [];
+    this.subagentForks = Array.isArray(init.subagentForks) ? init.subagentForks : [];
+    this.crashRecoveryMarker = init.crashRecoveryMarker;
+    this.toolState = init.toolState ?? { snapshots: [], completedTurns: 0 };
+  }
+
+  addSubagentFork(fork: SubagentFork): void {
+    this.subagentForks.push(fork);
+  }
+
+  completeSubagentFork(childId: string, info: { stepsUsed: number; error?: string }): void {
+    const fork = this.subagentForks.find((f) => f.childId === childId);
+    if (fork) {
+      fork.completedAt = Date.now();
+      fork.stepsUsed = info.stepsUsed;
+      fork.error = info.error;
+    }
   }
 
   static new(cwd: string, model: string): Session {
@@ -81,41 +143,157 @@ export class Session {
     this.messages.push(msg);
   }
 
-  save(): void {
-    const lines = [
-      JSON.stringify({
-        meta: true, id: this.id, cwd: this.cwd, model: this.model,
-        title: this.title, createdAt: this.createdAt,
-        compactedFrom: this.compactedFrom, usage: this.usage, digest: this.digest,
-        turnMarks: this.turnMarks,
-      }),
-      ...this.messages.map((m) => JSON.stringify(m)),
-    ];
-    writeFileSync(this.path(), lines.join("\n") + "\n", "utf8");
+  /** Append-only save: write new messages as JSONL, compact periodically */
+  async save(): Promise<void> {
+    if (this.messages.length === 0) return;
+
+    const dir = sessionsDir();
+    mkdirSync(dir, { recursive: true });
+    const path = this.path();
+
+    // Determine which messages to write (everything after compactedFrom)
+    const messagesToWrite = this.messages.slice(this.compactedFrom);
+    if (messagesToWrite.length === 0) return;
+
+    // Append JSONL with version header
+    const header = JSON.stringify({ version: 'jsonl', id: this.id, compactedFrom: this.compactedFrom });
+    const body = messagesToWrite.map((m) => JSON.stringify(m)).join('\n') + '\n';
+    await Bun.file(path, { create: true, open: 'a' }).write(header + '\n' + body);
+
+    this._saveCount++;
+
+    // Compact if needed
+    if (this.shouldCompact()) {
+      await this.compact();
+    }
   }
 
-  load(): void {
-    if (!existsSync(this.path())) throw new Error(`no session ${this.id}`);
-    const lines = readFileSync(this.path(), "utf8").split("\n").filter(Boolean);
-    const msgs: Message[] = [];
-    for (const line of lines) {
-      const obj = JSON.parse(line);
-      if (obj.meta) {
-        this.cwd = obj.cwd; this.model = obj.model; this.title = obj.title ?? "";
-        this.createdAt = obj.createdAt; this.compactedFrom = obj.compactedFrom ?? 0;
-        this.usage = { cacheRead: 0, cacheWrite: 0, ...(obj.usage ?? {}) };
-        this.digest = obj.digest ?? "";
-        this.turnMarks = Array.isArray(obj.turnMarks) ? obj.turnMarks : [];
-      } else {
-        msgs.push(obj as Message);
-      }
+  private shouldCompact(): boolean {
+    const remaining = this.messages.length - this.compactedFrom;
+    if (remaining >= Session.COMPACT_THRESHOLD) return true;
+
+    // Check file size
+    try {
+      const stats = Bun.file(this.path()).statSync();
+      return stats.size > Session.COMPACT_SIZE_THRESHOLD;
+    } catch {
+      return false;
     }
-    this.messages = msgs;
+  }
+
+  /** Rewrite full session as single JSON (compacted) */
+  async compact(): Promise<void> {
+    if (this.messages.length <= this.compactedFrom) return;
+
+    // Summarize old messages
+    const oldMessages = this.messages.slice(0, this.compactedFrom);
+    const digest = oldMessages.length > 0 ? await summarize(oldMessages) : '';
+
+    // Write compacted form
+    const data = {
+      id: this.id,
+      cwd: this.cwd,
+      model: this.model,
+      title: this.title,
+      createdAt: this.createdAt,
+      usage: this.usage,
+      turnMarks: this.turnMarks,
+      messages: this.messages.slice(this.compactedFrom),
+      compactedFrom: 0,
+      digest,
+      compactedAt: Date.now()
+    };
+
+    const dir = sessionsDir();
+    mkdirSync(dir, { recursive: true });
+    await Bun.file(this.path()).write(JSON.stringify(data) + '\n');
+
+    this.compactedFrom = 0;
+    this._saveCount = 0;
+  }
+
+  /** Load handles both JSONL and compact formats */
+  async load(): Promise<void> {
+    const path = this.path();
+    try {
+      const content = await Bun.file(path).text();
+      const lines = content.trim().split('\n').filter(Boolean);
+
+      // Try compact JSON format first (header line starts with { and no version field, or has compactedFrom at top)
+      try {
+        const data = JSON.parse(lines[0]);
+        if (data.messages && Array.isArray(data.messages) && !data.version) {
+          this.messages = data.messages;
+          this.compactedFrom = data.compactedFrom ?? 0;
+          this.digest = data.digest ?? '';
+          return;
+        }
+      } catch {
+        // Not compact JSON, try JSONL
+      }
+
+      // JSONL format: first line is version header
+      try {
+        const header = JSON.parse(lines[0]);
+        if (header.version === 'jsonl') {
+          this.messages = lines.slice(1).map(l => JSON.parse(l));
+          this.compactedFrom = header.compactedFrom ?? 0;
+          this.digest = header.digest ?? '';
+          return;
+        }
+        // If header is not jsonl version, treat as compact JSON fallback
+        if (header.messages && Array.isArray(header.messages)) {
+          this.messages = header.messages;
+          this.compactedFrom = header.compactedFrom ?? 0;
+          this.digest = header.digest ?? '';
+          return;
+        }
+      } catch {
+        // Not JSONL either
+      }
+
+      // Legacy: all lines are messages (no version header at all)
+      this.messages = lines.map(l => JSON.parse(l));
+      this.compactedFrom = 0;
+    } catch {
+      // File doesn't exist or is corrupt - keep existing state
+    }
   }
 
   /** The window sent to the provider: everything after the compaction cut. */
   context(): Message[] {
     return this.messages.slice(this.compactedFrom);
+  }
+
+  /** Mark start of a turn (for crash recovery). */
+  markTurnStart(turnIndex: number, pendingTools?: Array<{ tool: string; args: any; callId: string }>): void {
+    this.crashRecoveryMarker = {
+      turnIndex,
+      startedAt: Date.now(),
+      pendingTools: pendingTools ?? []
+    };
+  }
+
+  /** Clear recovery marker on successful turn completion. */
+  clearTurnMarker(): void {
+    this.crashRecoveryMarker = undefined;
+  }
+
+  /** Check if session has pending work from a crash (stale after 1 min). */
+  hasPendingTurn(): boolean {
+    return this.crashRecoveryMarker !== undefined &&
+      Date.now() - this.crashRecoveryMarker.startedAt > 60_000;
+  }
+
+  /** Recover from crash by replaying tool calls. */
+  async recover(): Promise<{ recovered: boolean; tools: Array<{ tool: string; args: any }> }> {
+    if (!this.crashRecoveryMarker?.pendingTools) {
+      return { recovered: false, tools: [] };
+    }
+    return {
+      recovered: true,
+      tools: this.crashRecoveryMarker.pendingTools.map((t) => ({ tool: t.tool, args: t.args })),
+    };
   }
 }
 

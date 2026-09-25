@@ -135,7 +135,7 @@ describe("tools", () => {
     const root = mkdtempSync(join(tmpdir(), "goat-root-"));
     writeFileSync(join(root, "a.txt"), "one\ntwo\nthree");
     const tk = new ToolKit(root, { autoApprove: true });
-    const r = tk.tool_read({ path: "a.txt" });
+    const r = await tk.tool_read({ path: "a.txt" });
     expect(r.ok).toBe(true);
     expect(r.output).toContain("1\tone");
     rmSync(root, { recursive: true, force: true });
@@ -149,6 +149,83 @@ describe("tools", () => {
     const r = await tk.dispatch("edit", { path: "b.txt", old_string: "dup", new_string: "x" });
     expect(r.ok).toBe(false);
     expect(r.output).toContain("matches 2 times");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("read streaming for large files (>100KB)", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-stream-"));
+    // Create a file >100KB with unique line numbers
+    const lines: string[] = [];
+    for (let i = 1; i <= 3000; i++) {
+      lines.push(`line ${i}: ${"x".repeat(30)}`);
+    }
+    const content = lines.join("\n") + "\n";
+    writeFileSync(join(root, "big.txt"), content);
+    expect(content.length).toBeGreaterThan(100_000);
+    const tk = new ToolKit(root, { autoApprove: true });
+    const r = await tk.tool_read({ path: "big.txt" });
+    expect(r.ok).toBe(true);
+    // Should show first 2000 lines (default limit)
+    expect(r.output).toContain("1\tline 1:");
+    expect(r.output).toContain("2000\tline 2000:");
+    // Should indicate more lines
+    expect(r.output).toContain("more lines");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("write streaming for large content (>500KB)", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-stream-"));
+    const content = "line " + "x".repeat(200_000) + " more " + "y".repeat(400_000) + "\n";
+    expect(content.length).toBeGreaterThan(500_000);
+    const tk = new ToolKit(root, { autoApprove: true });
+    const r = await tk.dispatch("write", { path: "big.txt", content });
+    expect(r.ok).toBe(true);
+    const fs = await import("node:fs");
+    const written = fs.readFileSync(join(root, "big.txt"), "utf8");
+    expect(written).toBe(content);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("edit streaming for large files (>100KB)", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-stream-"));
+    // Create a file >100KB with a unique marker in the middle
+    const lines: string[] = [];
+    for (let i = 1; i <= 3000; i++) {
+      lines.push(`line ${i}: ${"a".repeat(30)}`);
+    }
+    // Replace line 1500 with a marker
+    lines[1499] = "line 1500: REPLACE_ME_HERE";
+    const content = lines.join("\n") + "\n";
+    writeFileSync(join(root, "big.txt"), content);
+    expect(content.length).toBeGreaterThan(100_000);
+    const tk = new ToolKit(root, { autoApprove: true });
+    const r = await tk.dispatch("edit", { path: "big.txt", old_string: "line 1500: REPLACE_ME_HERE", new_string: "line 1500: REPLACED_OK" });
+    expect(r.ok).toBe(true);
+    const fs = await import("node:fs");
+    const written = fs.readFileSync(join(root, "big.txt"), "utf8");
+    expect(written).toContain("line 1500: REPLACED_OK");
+    expect(written).not.toContain("REPLACE_ME_HERE");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("readLineRange helper", async () => {
+    const { readLineRange } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-stream-"));
+    writeFileSync(join(root, "test.txt"), "line1\nline2\nline3\nline4\nline5\n");
+    const result = await readLineRange(join(root, "test.txt"), 1, 4);
+    expect(result).toBe("line2\nline3\nline4");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("countLines helper", async () => {
+    const { countLines } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-stream-"));
+    writeFileSync(join(root, "test.txt"), "line1\nline2\nline3\n");
+    const n = await countLines(join(root, "test.txt"));
+    expect(n).toBe(3);
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -266,7 +343,7 @@ describe("workspace", () => {
     writeFileSync(join(api, "src", "main.ts"), "export const token = 42;");
     const tk = new ToolKit(base, { autoApprove: true, roots: { api, ui } });
 
-    const r = tk.tool_read({ path: "api/src/main.ts" });
+    const r = await tk.tool_read({ path: "api/src/main.ts" });
     expect(r.ok).toBe(true);
     expect(r.output).toContain("token = 42");
     expect(tk.tool_grep({ pattern: "token" }).output).toContain("api/src/main.ts:1:");
@@ -1016,6 +1093,57 @@ describe("subagents", () => {
     expect(String(toolMsgs[1].content)).toContain("report-");
   });
 
+  test("ToolKit.clone() isolates mutable state for subagent execution", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-clone-"));
+    const tk = new ToolKit(root, { autoApprove: true });
+    await tk.dispatch("write", { path: "parent.txt", content: "parent" });
+    tk.plan([{ content: "parent task", activeForm: "parenting", status: "in_progress" }]);
+
+    const child = tk.clone();
+    expect(child.root).toBe(tk.root);
+    expect(child.sessionId).toBe(tk.sessionId);
+    expect(child.parentSessionId).toBe(tk.sessionId);
+    expect(child.forkIndex).toBe(0);
+
+    // mutable state is fresh in the clone
+    expect(child.plan()).toEqual([]); // no todos copied
+    // mutations on child do not affect parent
+    await child.dispatch("write", { path: "child.txt", content: "child" });
+    expect(existsSync(join(root, "child.txt"))).toBe(true);
+    expect(existsSync(join(root, "parent.txt"))).toBe(true); // parent file still there
+    // parent's undo stack is unaffected
+    expect(tk.undo()?.path).toContain("parent.txt");
+    expect(existsSync(join(root, "parent.txt"))).toBe(false); // parent undo worked
+    expect(existsSync(join(root, "child.txt"))).toBe(true); // child file persists
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("subagent fork metadata is tracked on the parent session", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    let calls = 0;
+    const client = {
+      async *streamChat(_msgs: any[]) {
+        calls++;
+        yield { textDelta: "done" };
+      },
+    } as any;
+    const session = Session.new(home, "mock/m");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 3,
+    });
+    for await (const _ of agent.runTurn("task {\"description\":\"x\",\"prompt\":\"y\"}")) void _;
+    expect(calls).toBeGreaterThanOrEqual(1);
+    expect(session.subagentForks.length).toBe(1);
+    expect(session.subagentForks[0].description).toBe("x");
+    expect(session.subagentForks[0].childId).toMatch(/^sub-/);
+    expect(session.subagentForks[0].completedAt).toBeGreaterThan(0);
+    expect(session.subagentForks[0].stepsUsed).toBe(0);
+  });
+
   test("sub-agents cannot spawn sub-agents", async () => {
     const { Agent } = await import("../src/agent.ts");
     const { Session } = await import("../src/session.ts");
@@ -1116,7 +1244,7 @@ describe("plan mode", () => {
     expect(bash.ok).toBe(false);
     expect((bash as any).output).toContain("plan mode");
     // reads still work
-    const read = tk.tool_read({ path: "f.txt" });
+    const read = await tk.tool_read({ path: "f.txt" });
     expect(read.ok).toBe(true);
     rmSync(root, { recursive: true, force: true });
   });

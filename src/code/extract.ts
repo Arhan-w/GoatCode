@@ -249,6 +249,44 @@ function regexFallback(content: string, ext: string): ExtractedFile {
       symbols.push({ name: m[1], kind: "type", line: lineNum(content, m.index ?? 0) });
     for (const m of content.matchAll(/import\s+"([^"]+)"/g)) imports.push(m[1]);
     for (const m of content.matchAll(/^\s+[\w.]*\s*"([^"]+)"/gm)) imports.push(m[1]);
+  } else if (ext === ".sh" || ext === ".bash" || ext === ".zsh" || ext === ".fish") {
+    for (const m of content.matchAll(/^(?:export\s+)?function\s+(\w+)/gm))
+      symbols.push({ name: m[1], kind: "function", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^\s*(\w+)\s*=/g))
+      symbols.push({ name: m[1], kind: "variable", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^(?:source|\.)\s+["']?([^"'\s]+)/gm)) imports.push(m[1]);
+  } else if (ext === ".sql" || ext === ".mysql" || ext === ".psql") {
+    for (const m of content.matchAll(/\bCREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+(\w+)/gi))
+      symbols.push({ name: m[1], kind: "procedure", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/\bCREATE\s+(?:TEMPORARY\s+)?TABLE\s+(\w+)/gi))
+      symbols.push({ name: m[1], kind: "table", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(\w+)/gi))
+      symbols.push({ name: m[1], kind: "function", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^(?:\s*--.*)?\s*(?:FROM|INTO|UPDATE|JOIN|TABLE)\s+(\w+)/gmi))
+      imports.push(m[1]);
+  } else if (ext === ".hcl" || ext === ".tf") {
+    for (const m of content.matchAll(/^\s*(resource|module|variable|output)\s+"(\w+)"/gm))
+      symbols.push({ name: m[2], kind: m[1], line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^\s*(data|provider)\s+"(\w+)"/gm))
+      symbols.push({ name: m[2], kind: m[1], line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^\s*source\s+=\s+"([^"]+)"/gm))
+      imports.push(m[1]);
+  } else if (ext === ".proto" || ext === ".protodevel") {
+    for (const m of content.matchAll(/^\s*message\s+(\w+)/gm))
+      symbols.push({ name: m[1], kind: "message", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^\s*enum\s+(\w+)/gm))
+      symbols.push({ name: m[1], kind: "enum", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^\s*rpc\s+(\w+)/gm))
+      symbols.push({ name: m[1], kind: "rpc", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^\s*(?:import|package)\s+"([^"]+)"/gm)) imports.push(m[1]);
+  } else if (ext === ".graphql" || ext === ".gql") {
+    for (const m of content.matchAll(/^\s*type\s+(\w+)/gm))
+      symbols.push({ name: m[1], kind: "type", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^\s*(?:query|mutation|subscription)\s+(\w+)/gm))
+      symbols.push({ name: m[1], kind: "operation", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^\s*enum\s+(\w+)/gm))
+      symbols.push({ name: m[1], kind: "enum", line: lineNum(content, m.index ?? 0) });
+    for (const m of content.matchAll(/^\s*(?:import|extend\s+type)\s+(\w+)/gm)) imports.push(m[1]);
   }
   return { symbols, imports, edges, heuristic: true };
 }

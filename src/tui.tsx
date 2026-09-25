@@ -10,6 +10,7 @@
  */
 import { Box, Static, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
+import { CommandPalette, type Command } from "./palette.ts";
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join, relative, resolve as resolvePath } from "node:path";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -216,6 +217,15 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [todos, setTodos] = useState<Todo[]>([]);
   const [statusLines, setStatusLines] = useState<string[]>([]);
 
+  // Command palette state
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [paletteCommands, setPaletteCommands] = useState<Command[]>([]);
+  const [paletteSelected, setPaletteSelected] = useState(0);
+
+  // Onboarding
+  const [shouldShowOnboard, setShouldShowOnboard] = useState(shouldShowOnboarding());
+  const [onboardStep, setOnboardStep] = useState(0);
+
   const abortRef = useRef<AbortController | null>(null);
   const queuedRef = useRef<string[]>([]);
   const submitRef = useRef<((raw: string) => void) | null>(null);
@@ -283,6 +293,33 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       const hint = cachedUpdateHint();
       if (hint) push(<Text dimColor color={DIM}>  ↑ GoatCode {hint.latest} available — run: goat self-update</Text>);
       else refreshUpdateHint();
+      // Build palette commands from all available sources
+      const slashCommands = (await import("./commands.tsx")).SLASH_COMMANDS;
+      const commandDescs = (await import("./commands.tsx")).COMMAND_DESC;
+      const skills = (await import("./skills/loader.ts")).allSkills;
+      const pluginNames = Object.keys((await import("./plugins/marketplace.ts")).loadPlugins);
+      const sessions = (await import("./session.ts")).listSessions();
+      const pluginDescriptions = pluginNames.map((n) => ({
+        name: `/plugin:${n}`,
+        description: `Plugin: ${n}`,
+        category: "plugin",
+      }));
+      const allCommands = paletteCommands; // Will be updated after skills/plugins load
+      setPaletteCommands(buildCommandList({
+        slashCommands,
+        commandDescs: COMMAND_DESC,
+        skills: skills,
+        plugins: pluginDescriptions,
+        sessions,
+      }));
+      // Run first-run wizard if needed
+      if (shouldShowOnboard) {
+        setShouldShowOnboard(false);
+        const onboardResult = await runFirstRunWizard();
+        if (!onboardResult) {
+          // User aborted or wizard completed
+        }
+      }
       // Collab: join a relay room advertised by GOAT_COLLAB_INVITE (Pillar B).
       const inviteCode = process.env.GOAT_COLLAB_INVITE;
       if (inviteCode && !collabRef.current) {
@@ -777,7 +814,13 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       push(<Text dimColor color={DIM}>  press ctrl+c again to exit · or /quit · session auto-saved</Text>);
       return;
     }
+    if (k.ctrl && ch === "p") {
+      // Ctrl+P: open command palette
+      setIsPaletteOpen(true);
+      return;
+    }
     if (k.ctrl && ch === "d") { exit(); return; }
+    if (k.ctrl && ch === "k") { setInput(""); return; }
     if (k.ctrl && ch === "k") { setInput(""); return; } // clear current input line
     if (k.ctrl && ch === "v") {
       // clipboard image attach (Claude-Code-style); text pastes are handled by
@@ -810,6 +853,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     if (k.ctrl && ch === "o") { cycleMode(); return; }
+    if (ch === "\x1b" || ch.toLowerCase() === "f1") { /* F1/Escape show help - handled below */ }
     // Shift+Tab arrives as an empty char with shift+tab flags (verified via
     // Ink's parse-keypress); older/odd terminals send ESC [ Z as raw text.
     if ((k.shift && k.tab) || ch === "\x1b[Z") { cycleMode(); return; }
@@ -985,6 +1029,33 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
     </Box>
   );
 }
+{isPaletteOpen ? (
+  <CommandPalette
+    commands={paletteCommands}
+    onSelect={(cmd: Command) => {
+      if (cmd.name.startsWith("/")) {
+        const line = cmd.name.slice(1);
+        const io: any = {
+          cfg: cfgRef.current,
+          push: (n: any) => setLines((prev) => [...prev, <Box key={lineKey.current++}>{n}</Box>]),
+          exit: () => setIsPaletteOpen(false),
+          session: session,
+          skills: [],
+          setMode: (m: any) => setMode(m),
+          reloadPlugins: () => 0,
+          collab: collabRef.current,
+          runTurn: async (text: any) => {},
+          sessionRules: () => [],
+          undoTurn: () => null,
+          sessionRules: () => [],
+        };
+        runSlash(line, io);
+      }
+      setIsPaletteOpen(false);
+    }}
+    onClose={() => setIsPaletteOpen(false)}
+  />
+) : null}
 
 // ---------- sub-components ----------
 

@@ -12,6 +12,7 @@ import {
 } from "./providers.ts";
 import { credentialValid } from "./providers.ts";
 import { GoatedFlashFreeClient, GOATED_FLASH_ID, FLASH_MODEL, FLASH_MODELS, FLASH_TOOL_INSTRUCTION } from "./gflash.ts";
+import { AuthError, ConfigError } from "./errors.ts";
 
 export class ResolveError extends Error {}
 export class AuthRequired extends ResolveError {
@@ -70,6 +71,8 @@ export async function resolve(cfg: GoatConfig, registry: ProviderRegistry): Prom
     cfg.model = `${GOATED_FLASH_ID}/${cfg.modelId}`;
     return { provider: flash, credential: { kind: "api_key", apiKey: "free", expiresAt: 0 }, client: new GoatedFlashFreeClient() };
   }
+  // Ensure catalog is loaded before resolving
+  await registry.ensureLoaded();
   const provider = registry.get(cfg.provider);
   if (!provider) throw new UnknownProvider(cfg.provider);
   let cred = registry.resolveCredential(provider.id);
@@ -98,7 +101,7 @@ function buildClient(fmt: string, base: string, cred: Credential, providerId: st
   }
   return makeClient(fmt, base, {
     apiKey, authToken, extraHeaders: headersFor(providerId),
-  });
+  }, providerId);
 }
 
 /**

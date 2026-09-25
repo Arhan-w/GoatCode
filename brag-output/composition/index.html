@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html data-composition-variables='[{"id":"bgColor","type":"color","label":"Background","default":"#000F08"},{"id":"accentColor","type":"color","label":"Accent","default":"#a855f7"},{"id":"textColor","type":"color","label":"Text","default":"#E0E0FF"}]'>
+<head>
+  <meta charset="UTF-8">
+  <title>GoatCode v3 Launch</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000F08;
+      color: #E0E0FF;
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+    }
+    
+    /* Root composition */
+    #root {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      background: #000F08;
+    }
+    
+    .scene {
+      position: absolute;
+      top: 0; left: 0;
+      width: 1920px; height: 1080px;
+      opacity: 0;
+    }
+    
+    /* Scene 1: Hook */
+    .scene-1 { 
+      justify-content: center; align-items: center;
+      display: flex;
+    }
+    .scene-1 h1 {
+      font-size: 72px; font-weight: 900;
+      color: #a855f7;
+      text-align: center;
+      max-width: 1600px;
+      line-height: 1.2;
+    }
+    
+    /* Scene 2: Problem */
+    .scene-2 { display: flex; flex-direction: row; }
+    .split-left { 
+      flex: 1; background: #1a1a2e; 
+      display: flex; flex-direction: column; 
+      justify-content: center; padding: 60px;
+    }
+    .split-right { 
+      flex: 1; background: #000F08;
+      display: flex; flex-direction: column;
+      justify-content: center; padding: 60px;
+      border-left: 4px solid #a855f7;
+    }
+    .chaos-text { color: #ff4444; font-size: 48px; font-weight: 700; margin: 20px 0; }
+    .clean-text { color: #44ff44; font-size: 48px; font-weight: 700; margin: 20px 0; }
+    
+    /* Scene 3: Multi-Repo */
+    .scene-3 { justify-content: center; align-items: center; display: flex; background: #000F08; }
+    .repo-graph { position: relative; width: 1400px; height: 700px; }
+    .repo-node {
+      position: absolute;
+      width: 200px; height: 120px;
+      background: #25262D;
+      border: 3px solid #a855f7;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; font-weight: 700; color: #E0E0FF;
+      box-shadow: 0 0 30px rgba(168, 85, 247, 0.5);
+    }
+    .repo-node.center { 
+      width: 300px; height: 160px;
+      background: #a855f7; color: #000F08;
+      font-size: 36px;
+    }
+    
+    /* Scene 4: Code Intelligence */
+    .scene-4 { justify-content: center; align-items: center; display: flex; background: #000F08; }
+    .ast-visual {
+      display: flex; flex-direction: column; align-items: center; gap: 40px;
+    }
+    .ast-row {
+      display: flex; gap: 30px;
+    }
+    .ast-node {
+      width: 120px; height: 80px;
+      background: #25262D;
+      border: 2px solid #a855f7;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 700;
+    }
+    .ast-node.found { background: #a855f7; color: #000F08; }
+    
+    /* Scene 5: P2P */
+    .scene-5 { justify-content: center; align-items: center; display: flex; background: #000F08; }
+    .p2p-visual { text-align: center; }
+    .p2p-terminal {
+      width: 700px; height: 400px;
+      background: #1a1a2e;
+      border-radius: 12px;
+      border: 3px solid #a855f7;
+      padding: 30px;
+      font-family: monospace;
+      font-size: 24px;
+      color: #E0E0FF;
+    }
+    .cursor-blink { animation: blink 1s infinite; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+    
+    /* Scene 6: Outro */
+    .scene-6 { justify-content: center; align-items: center; display: flex; background: #000F08; }
+    .logo-large {
+      font-size: 120px; font-weight: 900; color: #a855f7;
+      text-shadow: 0 0 60px rgba(168, 85, 247, 0.8);
+    }
+    .tagline {
+      font-size: 48px; font-weight: 700;
+      color: #E0E0FF; margin-top: 30px;
+      letter-spacing: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="root" data-composition-id="root" data-width="1920" data-height="1080">
+    
+    <!-- Scene 1: Hook -->
+    <div class="scene scene-1 clip" id="scene-1-hook" data-start="0" data-duration="3">
+      <h1>What if your terminal AI agent needed zero API keys, zero configuration, and still gave you 180+ LLM providers?</h1>
+    </div>
+    
+    <!-- Scene 2: Problem -->
+    <div class="scene scene-2 clip" id="scene-2-problem" data-start="3" data-duration="4">
+      <div class="split-left">
+        <div class="chaos-text">❌ API Key Required</div>
+        <div class="chaos-text">❌ Complex Config</div>
+        <div class="chaos-text">❌ Multiple Tools</div>
+      </div>
+      <div class="split-right">
+        <div class="clean-text">✅ Just Works</div>
+        <div class="clean-text">✅ Zero Setup</div>
+        <div class="clean-text">✅ GoatCode</div>
+      </div>
+    </div>
+    
+    <!-- Scene 3: Multi-Repo -->
+    <div class="scene scene-3 clip" id="scene-3-repo" data-start="7" data-duration="4">
+      <div class="repo-graph">
+        <div class="repo-node" style="top: 100px; left: 100px;">repo-alpha</div>
+        <div class="repo-node" style="top: 100px; right: 100px;">repo-beta</div>
+        <div class="repo-node" style="bottom: 100px; left: 100px;">repo-gamma</div>
+        <div class="repo-node" style="bottom: 100px; right: 100px;">repo-delta</div>
+        <div class="repo-node center" style="top: 50%; left: 50%; transform: translate(-50%, -50%);">GoatCode Core</div>
+      </div>
+    </div>
+    
+    <!-- Scene 4: Code Intelligence -->
+    <div class="scene scene-4 clip" id="scene-4-code" data-start="11" data-duration="4">
+      <div class="ast-visual">
+        <div class="ast-row">
+          <div class="ast-node">root</div>
+          <div class="ast-node found">resolveRepos</div>
+          <div class="ast-node found">findIndex</div>
+          <div class="ast-node">...→</div>
+        </div>
+        <div class="ast-row">
+          <div class="ast-node">TS</div>
+          <div class="ast-node">JS</div>
+          <div class="ast-node found">TF-IDF</div>
+          <div class="ast-node">Rank</div>
+        </div>
+        <div style="font-size: 36px; color: #a855f7; margin-top: 20px;">Instant Symbol Ranking Across All Repos</div>
+      </div>
+    </div>
+    
+    <!-- Scene 5: P2P -->
+    <div class="scene scene-5 clip" id="scene-5-p2p" data-start="15" data-duration="3">
+      <div class="p2p-visual">
+        <div class="p2p-terminal">
+          $ /share<br>
+          → Invite code: ABC-123<br>
+          → Peer joined!<br>
+          <span class="cursor-blink">_</span>
+        </div>
+        <div style="margin-top: 30px; font-size: 32px; color: #a855f7;">End-to-End Encrypted Collaboration</div>
+      </div>
+    </div>
+    
+    <!-- Scene 6: Outro -->
+    <div class="scene scene-6 clip" id="scene-6-outro" data-start="18" data-duration="2">
+      <div style="text-align: center;">
+        <div class="logo-large">🐐 GoatCode v3</div>
+        <div class="tagline">EVERY PROVIDER. ONE TERMINAL. ZERO SETUP.</div>
+      </div>
+    </div>
+    
+    <!-- Audio -->
+    <audio id="bgMusic" src="assets/music/happy-beats-business-moves-vol-1-by-ende-dot-app.mp3" data-start="0" data-duration="20" data-volume="0.6"></audio>
+    
+  </div>
+  
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    
+    // Scene transitions
+    tl.to('#scene-1-hook', { opacity: 1, duration: 0.5 }, 0)
+      .to('#scene-1-hook', { opacity: 0, duration: 0.3 }, 2.7)
+      .from('#scene-2-problem', { opacity: 0, duration: 0.3 }, 3)
+      .to('#scene-2-problem', { opacity: 0, duration: 0.3 }, 6.7)
+      .from('#scene-3-repo', { opacity: 0, duration: 0.3 }, 7)
+      .to('#scene-3-repo', { opacity: 0, duration: 0.3 }, 10.7)
+      .from('#scene-4-code', { opacity: 0, duration: 0.3 }, 11)
+      .to('#scene-4-code', { opacity: 0, duration: 0.3 }, 14.7)
+      .from('#scene-5-p2p', { opacity: 0, duration: 0.3 }, 15)
+      .to('#scene-5-p2p', { opacity: 0, duration: 0.3 }, 17.7)
+      .from('#scene-6-outro', { opacity: 0, duration: 0.5 }, 18);
+    
+    window.__timelines = window.__timelines || {};
+    window.__timelines['root'] = tl;
+  </script>
+</body>
+</html>

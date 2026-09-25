@@ -23,6 +23,7 @@
  */
 import { run } from "./tui.tsx";
 import { buildUserContent } from "./refs.ts";
+import { shouldShowOnboarding, runFirstRunWizard } from "./onboarding.ts";
 import { appDir, configPath, loadConfig, saveConfig, splitModel, resolveRepos, type CustomEndpoint, type WireFormat } from "./config.ts";
 import { CredentialStore, OAUTH_PROVIDERS, ProviderRegistry, normalizeBaseUrl, type Credential } from "./providers.ts";
 import { listSessions } from "./session.ts";
@@ -41,6 +42,8 @@ import { join } from "node:path";
 import type { GoatConfig } from "./config.ts";
 import { VERSION } from "./constants.ts";
 import { selfUpdate, checkForUpdate, refreshUpdateHint } from "./update.ts";
+import { ConfigError } from "./errors.ts";
+import { runDoctor } from "./doctor.ts";
 
 import { allSkills } from "./index-shared.ts";
 export { allSkills };
@@ -191,6 +194,7 @@ async function main(): Promise<number> {
   }
 
   if (sub === "providers") {
+    await registry.preload();
     for (const p of registry.listAll()) {
       const mark = registry.resolveCredential(p.id) ? "✓" : " ";
       console.log(` ${mark} ${p.id.padEnd(30)} [${p.format}] ${p.baseUrl}`);
@@ -203,6 +207,7 @@ async function main(): Promise<number> {
   }
 
   if (sub === "models") {
+    await registry.preload();
     const pid = argv[1];
     const p = pid ? registry.get(pid) : undefined;
     if (!p) { console.error("usage: goat models <provider>"); return 1; }
@@ -283,6 +288,13 @@ async function main(): Promise<number> {
     for (const row of listSessions())
       console.log(`  ${row.id}  ${row.model.padEnd(34)} ${row.title.slice(0, 60)}`);
     return 0;
+  }
+
+  if (sub === "doctor") {
+    const fix = has("--fix");
+    const json = has("--json");
+    const exitCode = await runDoctor(fix, json);
+    return exitCode;
   }
 
   // goat config [get <key> | set <key> <value> | unset <key> | path]

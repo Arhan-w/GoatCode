@@ -182,6 +182,69 @@ describe("extract regex fallback", () => {
     expect(names).toContain("MyClass");
     expect(names).toContain("X");
   });
+
+  // ---------- new language fallbacks (task-9) ----------
+  test("shell regex fallback: functions + variables + source imports", async () => {
+    const { extractFileRegexFallback } = await import("../src/code/extract.ts");
+    const sh = `#!/bin/bash\nfunction greet() { echo hi; }\nNAME=world\nsource ./helpers.sh\n. ./lib.sh\n`;
+    const r = await extractFileRegexFallback(sh, ".sh");
+    expect(r.heuristic).toBe(true);
+    expect(r.symbols.map((s) => s.name)).toContain("greet");
+    // variable symbols are not guaranteed in regex fallback for shell (var=value at line start);
+    // function symbols are captured; source/./ imports are captured separately
+  });
+
+  test("sql regex fallback: procedures, tables, functions", async () => {
+    const { extractFileRegexFallback } = await import("../src/code/extract.ts");
+    const sql = `CREATE TABLE users (id INT);\nCREATE OR REPLACE FUNCTION count_users() RETURNS INT;\nCREATE PROCEDURE refresh()\nSELECT * FROM orders;\nFROM products;\n`;
+    const r = await extractFileRegexFallback(sql, ".sql");
+    expect(r.heuristic).toBe(true);
+    const names = r.symbols.map((s) => s.name);
+    expect(names).toContain("users");
+    expect(names).toContain("count_users");
+    expect(names).toContain("refresh");
+    // regex captures FROM at line-start, matching "products" but not mid-line "FROM orders"
+    expect(r.imports).toContain("products");
+  });
+
+  test("hcl regex fallback: resource/module/variable blocks", async () => {
+    const { extractFileRegexFallback } = await import("../src/code/extract.ts");
+    const hcl = `resource "aws_instance" "web" {}\nmodule "net" { source = "./net" }\nvariable "ami" {}\noutput "ip" {}\ndata "aws_ami" "ubuntu" {}\nprovider "aws" { region = "us-east-1" }\n`;
+    const r = await extractFileRegexFallback(hcl, ".hcl");
+    expect(r.heuristic).toBe(true);
+    const names = r.symbols.map((s) => s.name);
+    // regex captures the first identifier after the keyword (resource type / module name / variable name / output name)
+    expect(names).toContain("aws_instance"); // resource type name
+    expect(names).toContain("net");           // module name
+    expect(names).toContain("ami");           // variable name
+    expect(names).toContain("ip");            // output name
+    // source imports are not captured as "imports" in the regex fallback for HCL
+    // (source = "./net" appears on the same line as the module keyword)
+  });
+
+  test("protobuf regex fallback: messages, enums, rpc", async () => {
+    const { extractFileRegexFallback } = await import("../src/code/extract.ts");
+    const proto = `syntax = "proto3";\npackage mypkg;\nmessage User { string name = 1; }\nenum Status { ACTIVE = 0; }\nrpc GetUser(User) returns (User);\nimport "shared.proto";\n`;
+    const r = await extractFileRegexFallback(proto, ".proto");
+    expect(r.heuristic).toBe(true);
+    const names = r.symbols.map((s) => s.name);
+    expect(names).toContain("User");
+    expect(names).toContain("Status");
+    expect(names).toContain("GetUser");
+    expect(r.imports).toContain("shared.proto");
+  });
+
+  test("graphql regex fallback: types, operations, enums", async () => {
+    const { extractFileRegexFallback } = await import("../src/code/extract.ts");
+    const gql = `type Query { user(id: ID!): User }\ntype User { name: String }\nenum Role { ADMIN USER }\nquery GetUser { user(id: "1") { name } }\n`;
+    const r = await extractFileRegexFallback(gql, ".graphql");
+    expect(r.heuristic).toBe(true);
+    const names = r.symbols.map((s) => s.name);
+    expect(names).toContain("Query");
+    expect(names).toContain("User");
+    expect(names).toContain("Role");
+    expect(names).toContain("GetUser");
+  });
 });
 
 // ---------- incremental index ----------

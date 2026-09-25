@@ -6,9 +6,10 @@
 import { buildSystemPrompt } from "./system-prompt.ts";
 import { contentChars, isRetryableLLMError, textOf, type ChatClient, type ContentPart, type Message, type StreamEvent, type ToolCall, type ToolSpec } from "./llm.ts";
 import { Session, summarize } from "./session.ts";
-import { ToolKit, type PermissionFn, type Todo, type ToolResult } from "./tools.ts";
+import { ToolKit, getToolSpec, type PermissionFn, type Todo, type ToolResult } from "./tools.ts";
 import { fireHooks, MAX_STOP_HOOK_CONTINUES } from "./hooks.ts";
-import { SUBAGENT_MAX_STEPS, ULTRACODE_FANOUT } from "./constants.ts";
+import { SUBAGENT_MAX_STEPS } from "./constants.ts";
+import { ConfigError, ProviderError, AuthError, RateLimitError } from "./errors.ts";
 
 export const COMPACT_TRIGGER_CHARS = 220_000;
 /** Attempt budget for transient LLM failures (429/5xx/network) within one step. */
@@ -159,44 +160,81 @@ export class Agent {
         role: "assistant", content: assistantText, toolCalls,
       };
       this.session.append(assistantMsg as Message);
-      // Read-only tools (read/grep/glob/webfetch/...) fan out concurrently —
-      // a 5-file exploration costs one round of latency, not five. Everything
-      // else (writes, bash, permission-prompting calls) stays sequential.
+      // Mark turn start for crash recovery (before tool execution).
+      this.session.markTurnStart(this.session.messages.length, toolCalls.map((tc) => ({
+        tool: tc.name,
+        args: tc.arguments,
+        callId: tc.id,
+      })));
+      // Dependency-aware parallel scheduler: tools whose writeSets don't overlap
+      // run concurrently (cap 4). Read-only tools (read/grep/glob/...) naturally
+      // batch together; mutating tools (write/edit/bash/todo/...) run sequentially
+      // relative to each other but may overlap with pure reads. Task subagents
+      // are constrained by ULTRACODE_FANOUT and are independent by construction.
+      const MAX_PARALLEL = 4;
       const results = new Map<ToolCall, ToolResult>();
-      let i = 0;
-      while (i < toolCalls.length) {
-        // Parallel subagents: consecutive `task` calls fan out (cap 3) — each
-        // gets a fresh context, so they're independent by construction.
-        // Permission prompts from inside them are serialized by the TUI queue.
-        if (toolCalls[i].name === "task" && !this.disallowedTools.has("task")) {
-          const batch: ToolCall[] = [];
-          while (i < toolCalls.length && toolCalls[i].name === "task" && batch.length < ULTRACODE_FANOUT)
-            batch.push(toolCalls[i++]);
-          for (const c of batch)
-            yield { kind: "tool_start", tool: "task", args: c.arguments };
-          const settled = await Promise.all(
-            batch.map((c) => this.spawnSubagent(c.arguments, signal)));
-          batch.forEach((c, k) => results.set(c, settled[k]));
-          continue;
+      const pending: ToolCall[] = [...toolCalls];
+      const completed = new Set<string>();
+
+      while (pending.length > 0) {
+        // Build next batch: pick up to MAX_PARALLEL tools that don't conflict
+        // with already-running writes (this round) or any completed writes.
+        const batch: ToolCall[] = [];
+        const remaining = pending.filter((tc) => {
+          if (batch.length >= MAX_PARALLEL) return true; // keep in pending
+          const deps = getToolSpec(tc.name, tc.arguments);
+          // Check conflict against already-running tools in this batch
+          const conflicts = batch.some((other) => {
+            const otherDeps = getToolSpec(other.name, other.arguments);
+            return (
+              deps.writeSet.some((w) => otherDeps.writeSet.includes(w)) ||
+              deps.readSet.some((r) => otherDeps.writeSet.includes(r)) ||
+              otherDeps.readSet.some((r) => deps.writeSet.includes(r))
+            );
+          });
+          // Check conflict against completed writes
+          const conflictsCompleted = deps.writeSet.some((w) => completed.has(w)) ||
+            deps.readSet.some((r) => completed.has(r));
+          if (conflicts || conflictsCompleted) return true;
+          batch.push(tc);
+          return false;
+        });
+        pending.length = 0;
+        remaining.forEach((tc) => pending.push(tc));
+
+        if (batch.length === 0) {
+          // Deadlock: no tool can proceed (all conflict with completed writes).
+          // Fall back to sequential execution of the first pending tool.
+          const call = pending.shift()!;
+          batch.push(call);
         }
-        if (CONCURRENT_SAFE.has(toolCalls[i].name) && !this.disallowedTools.has(toolCalls[i].name)) {
-          const batch: ToolCall[] = [];
-          while (i < toolCalls.length && CONCURRENT_SAFE.has(toolCalls[i].name)) batch.push(toolCalls[i++]);
-          for (const c of batch) yield { kind: "tool_start", tool: c.name, args: c.arguments };
-          const settled = await Promise.all(batch.map((c) => this.tools.dispatch(c.name, c.arguments, signal)));
-          batch.forEach((c, k) => results.set(c, settled[k]));
-        } else {
-          const call = toolCalls[i++];
+
+        // Execute batch
+        for (const call of batch) {
           yield { kind: "tool_start", tool: call.name, args: call.arguments };
-          let result;
-          if (call.name === "task") {
-            if (this.disallowedTools.has("task"))
-              result = { ok: false, output: "subagents cannot spawn subagents" };
-            else result = await this.spawnSubagent(call.arguments, signal);
-          } else {
-            result = await this.tools.dispatch(call.name, call.arguments, signal);
-          }
+        }
+        if (batch.length === 1) {
+          const call = batch[0];
+          const result = await (call.name === "task" && !this.disallowedTools.has("task")
+            ? this.spawnSubagent(call.arguments, signal)
+            : this.tools.dispatch(call.name, call.arguments, signal));
           results.set(call, result);
+        } else {
+          // Parallel execution for the batch
+          const settled = await Promise.all(
+            batch.map(async (call) => {
+              if (call.name === "task" && !this.disallowedTools.has("task")) {
+                return this.spawnSubagent(call.arguments, signal);
+              }
+              return this.tools.dispatch(call.name, call.arguments, signal);
+            }),
+          );
+          batch.forEach((call, k) => results.set(call, settled[k]));
+        }
+        // Record completed writes for conflict detection
+        for (const call of batch) {
+          const deps = getToolSpec(call.name, call.arguments);
+          deps.writeSet.forEach((w) => completed.add(w));
         }
       }
       for (const call of toolCalls) {
@@ -210,6 +248,8 @@ export class Agent {
         if (call.name === "todo" && result.ok)
           yield { kind: "todo", todos: this.tools.plan() };
       }
+      // Clear crash recovery marker — turn completed successfully.
+      this.session.clearTurnMarker();
       this.maybeCompact();
       this.session.save();
     }
@@ -241,6 +281,9 @@ export class Agent {
         }
         return;
       } catch (e: any) {
+        const err = e instanceof GoatError ? e : new GoatError('ERR_GENERIC', `${e?.name ?? "Error"}: ${e?.message ?? e}`, {
+          suggestion: 'Check provider status or try a different provider'
+        });
         if (timedOut && !signal?.aborted)
           e = new Error(`request timed out after ${Math.round(this.requestTimeoutMs / 1000)}s`);
         if (timedOut && !signal?.aborted) (e as any).status = 408;
@@ -280,10 +323,10 @@ export class Agent {
               }
             }
             if (switched) return;
-            yield { kind: "error", text: `all providers failed — last error: ${reason}` };
+            yield { kind: "error", text: `all providers failed — ${err.code}: ${err.message}` };
             return;
           }
-          yield { kind: "error", text: `${e?.name ?? "Error"}: ${e?.message ?? e}` };
+          yield { kind: "error", text: `${err.code}: ${err.message}\n  💡 ${err.suggestion ?? ''}` };
           return;
         }
         const backoff = Math.min(RETRY_MAX_MS, this.retryBaseMs * 2 ** (attempt - 1));
@@ -330,9 +373,13 @@ export class Agent {
   }
 
   /**
-   * Sub-agent: fresh context (no history bleed), shared ToolKit so undo,
-   * permission rules, hooks and MCP all apply. Explore mode = read-only
-   * toolset. Returns the sub-agent's final text as the tool result.
+   * Sub-agent: fresh context (no history bleed), cloned ToolKit so undo,
+   * permission rules, hooks and MCP all apply independently. Explore mode
+   * = read-only toolset. Returns the sub-agent's final text as the tool
+   * result.
+   *
+   * The cloned toolkit gets a fresh session with a "sub-" prefixed id so
+   * session fork metadata can track parent -> child relationships.
    */
   private async spawnSubagent(args: Record<string, unknown>, signal?: AbortSignal): Promise<{ ok: boolean; output: string }> {
     const prompt = String(args.prompt ?? "").trim();
@@ -340,12 +387,32 @@ export class Agent {
     const description = String(args.description ?? "subagent").slice(0, 60);
     const explore = String(args.subagent_type ?? "") === "explore";
     const disallowed = new Set(["task", "write", "edit", "undo", ...(explore ? ["bash", "computer"] : ["computer"])]);
-    const sub = Session.new(this.session.cwd, this.session.model);
+
+    // --- isolated toolkit clone ---
+    const subToolKit = this.tools.clone();
+    subToolKit.parentSessionId = this.session.id;
+    const forkIdx = (this.session.subagentForks?.length ?? 0);
+    subToolKit.forkIndex = forkIdx;
+
+    // --- forked session ---
+    const sub = new Session({
+      id: `sub-${crypto.randomUUID()}`,
+      cwd: this.session.cwd,
+      model: this.session.model,
+    });
     sub.title = `subagent: ${description}`;
+    // record the fork in the parent session
+    this.session.addSubagentFork({
+      childId: sub.id,
+      description,
+      explore,
+      startedAt: Date.now(),
+    });
+
     const child = new Agent({
       // explore agents are pure reading: route them to the cheap model if configured
       client: explore && this.smallClient ? this.smallClient : this.client,
-      session: sub, tools: this.tools,
+      session: sub, tools: subToolKit,
       maxTokens: this.maxTokens, temperature: this.temperature,
       maxSteps: SUBAGENT_MAX_STEPS, extraSystem: this.extraSystem,
       retryBaseMs: this.retryBaseMs, maxAttempts: this.maxAttempts,
@@ -359,6 +426,9 @@ export class Agent {
       else if (ev.kind === "tool_start") stepsUsed++;
       else if (ev.kind === "error") error = ev.text;
     }
+    // record completion in the parent session
+    this.session.completeSubagentFork(sub.id, { stepsUsed, error });
+
     const final = text.trim();
     if (!final)
       return { ok: false, output: `subagent "${description}" produced no answer${error ? `: ${error}` : ""}` };

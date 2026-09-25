@@ -8,6 +8,10 @@
  * All yield the same StreamEvent shape so the agent loop is model-agnostic.
  */
 
+import { SSE_MIN_CHUNK_CHARS, SSE_MAX_LATENCY_MS } from "./constants.ts";
+import { PROVIDER_RATE_LIMITS, RateLimiterConfig } from "./providers.ts";
+import { TokenBucketRateLimiter, RateLimiterRegistry } from "./rate-limiter.ts";
+
 export interface ToolSpec {
   name: string;
   description: string;
@@ -140,24 +144,78 @@ export interface ChatClient {
 
 // ---------- SSE plumbing ----------
 
-async function* sseLines(res: Response): AsyncGenerator<string> {
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
+async function* sseLines(
+  response: Response,
+  options?: { minChunkSize?: number; maxLatencyMs?: number }
+): AsyncGenerator<string> {
+  const minChunk = options?.minChunkSize ?? SSE_MIN_CHUNK_CHARS;
+  const maxLatency = options?.maxLatencyMs ?? SSE_MAX_LATENCY_MS;
+
+  let buffer = "";
+  let lastFlush = Date.now();
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let flushPromise: Promise<void> | null = null;
+  let flushResolve: (() => void) | null = null;
+
+  const scheduleFlush = () => {
+    if (flushTimer) clearTimeout(flushTimer);
+    flushPromise = new Promise(resolve => { flushResolve = resolve; });
+    flushTimer = setTimeout(() => { flushResolve?.(); }, maxLatency);
+  };
+
+  async function* flushGen(): AsyncGenerator<string, void> {
+    if (buffer.length > 0) {
+      yield buffer;
+      buffer = "";
+    }
+    flushResolve?.();
+    flushResolve = null;
+    flushPromise = null;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) return;
+
   try {
-    for (;;) {
+    while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let idx: number;
-      while ((idx = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, idx).replace(/\r$/, "");
-        buf = buf.slice(idx + 1);
-        if (line.startsWith("data:")) yield line.slice(5).trim();
+
+      const chunk = new TextDecoder().decode(value);
+      buffer += chunk;
+
+      // Emit complete lines as they arrive (for tool_calls, usage events)
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        // For non-text events, emit immediately
+        if (!trimmed.startsWith("data: ") || trimmed.includes("tool_calls") || trimmed.includes("usage")) {
+          yield trimmed.slice(6); // strip 'data: '
+          continue;
+        }
+
+        // Buffer text deltas
+        buffer += "\n" + trimmed;
+        scheduleFlush();
+
+        // Emit if buffer is large enough
+        if (buffer.length >= minChunk) {
+          await flushGen().next();
+        }
       }
     }
-    if (buf.startsWith("data:")) yield buf.slice(5).trim();
+
+    // Final flush
+    if (buffer.length > 0) {
+      yield buffer;
+    }
   } finally {
+    if (flushTimer) clearTimeout(flushTimer);
+    await flushPromise ?? Promise.resolve();
     reader.releaseLock();
   }
 }
@@ -251,7 +309,7 @@ export class OpenAIChatClient implements ChatClient {
 
     const res = await postJson(`${this.baseUrl}/chat/completions`, this.headers(), payload, opts.signal);
     const partial = new Map<number, { id: string; name: string; args: string }>();
-    for await (const data of sseLines(res)) {
+    for await (const data of sseLines(res, { minChunkSize: 16, maxLatencyMs: 50 })) {
       if (data === "[DONE]") break;
       const obj = safeParse(data);
       if (!obj) continue;
@@ -371,7 +429,7 @@ export class AnthropicClient implements ChatClient {
     const toolBuf = new Map<number, { id: string; name: string; json: string }>();
     const cacheTok = { read: 0, write: 0 };
     let blockType = "";
-    for await (const data of sseLines(res)) {
+    for await (const data of sseLines(res, { minChunkSize: 16, maxLatencyMs: 50 })) {
       const obj = safeParse(data);
       if (!obj) continue;
       switch (obj.type) {
@@ -485,7 +543,7 @@ export class OpenAIResponsesClient implements ChatClient {
 
     const res = await postJson(`${this.baseUrl}/responses`, this.headers(), payload, opts.signal);
     const calls = new Map<string, { id: string; name: string; args: string }>();
-    for await (const data of sseLines(res)) {
+    for await (const data of sseLines(res, { minChunkSize: 16, maxLatencyMs: 50 })) {
       const obj = safeParse(data);
       if (!obj) continue;
       const type = obj.type ?? "";
@@ -615,7 +673,7 @@ export class GeminiClient implements ChatClient {
     }
     const res = await postJson(url, this.headers(), payload, opts.signal);
     const calls: ToolCall[] = [];
-    for await (const data of sseLines(res)) {
+    for await (const data of sseLines(res, { minChunkSize: 16, maxLatencyMs: 50 })) {
       const obj = safeParse(data);
       if (!obj) continue;
       const inner = obj.request?.response ? obj : { response: obj };
@@ -641,21 +699,64 @@ export class GeminiClient implements ChatClient {
   }
 }
 
+// ---------- rate-limiting wrapper ----------
+
+/**
+ * Wraps a ChatClient with per-provider token-bucket rate limiting.
+ * Tokens are decremented on acquire (pre-request). No explicit release
+ * is needed after the request completes.
+ */
+export class RateLimitedChatClient implements ChatClient {
+  private readonly limiter: TokenBucketRateLimiter;
+
+  constructor(
+    private readonly inner: ChatClient,
+    private readonly providerId: string,
+  ) {
+    const config = PROVIDER_RATE_LIMITS[providerId];
+    const registry = RateLimiterRegistry.get();
+    this.limiter = registry.register(providerId, config ?? {});
+  }
+
+  async *streamChat(messages: Message[], tools: ToolSpec[], opts: StreamOpts): AsyncGenerator<StreamEvent> {
+    const result = this.limiter.tryAcquire();
+    if (!result.allowed) {
+      // Wait for a token to become available, then retry once
+      await new Promise((resolve) => setTimeout(resolve, result.waitMs));
+      const retry = this.limiter.tryAcquire();
+      if (!retry.allowed) {
+        yield { error: `Rate limit exceeded for ${this.providerId}. Retry after ${Math.round(retry.waitMs / 1000)}s` };
+        return;
+      }
+    }
+    yield *this.inner.streamChat(messages, tools, opts);
+  }
+}
+
 // ---------- factory ----------
 
 export function makeClient(
   format: string, baseUrl: string,
   opts: { apiKey?: string; authToken?: string; extraHeaders?: Record<string, string> },
+  providerId?: string,
 ): ChatClient {
-  switch (format) {
-    case "claude":
-      return new AnthropicClient(baseUrl, opts.apiKey, opts.authToken, opts.extraHeaders);
-    case "openai-responses":
-      return new OpenAIResponsesClient(baseUrl, opts.apiKey, opts.authToken, opts.extraHeaders);
-    case "gemini":
-    case "gemini-oauth":
-      return new GeminiClient(baseUrl, opts.apiKey, opts.authToken, opts.extraHeaders);
-    default:
-      return new OpenAIChatClient(baseUrl, opts.apiKey ?? opts.authToken, opts.extraHeaders);
+  const inner: ChatClient = (() => {
+    switch (format) {
+      case "claude":
+        return new AnthropicClient(baseUrl, opts.apiKey, opts.authToken, opts.extraHeaders);
+      case "openai-responses":
+        return new OpenAIResponsesClient(baseUrl, opts.apiKey, opts.authToken, opts.extraHeaders);
+      case "gemini":
+      case "gemini-oauth":
+        return new GeminiClient(baseUrl, opts.apiKey, opts.authToken, opts.extraHeaders);
+      default:
+        return new OpenAIChatClient(baseUrl, opts.apiKey ?? opts.authToken, opts.extraHeaders);
+    }
+  })();
+
+  // Wrap with rate limiting when a provider ID is known
+  if (providerId && providerId !== GOATED_FLASH_ID) {
+    return new RateLimitedChatClient(inner, providerId);
   }
+  return inner;
 }
