@@ -1,0 +1,8 @@
+file 'D:/GoatCode/reel/work/scenes/hero.mp4'
+file 'D:/GoatCode/reel/work/scenes/failover.mp4'
+file 'D:/GoatCode/reel/work/scenes/flash.mp4'
+file 'D:/GoatCode/reel/work/scenes/code.mp4'
+file 'D:/GoatCode/reel/work/scenes/collab.mp4'
+file 'D:/GoatCode/reel/work/scenes/ultra.mp4'
+file 'D:/GoatCode/reel/work/scenes/goat.mp4'
+file 'D:/GoatCode/reel/work/scenes/cta.mp4'

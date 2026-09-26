@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GoatCode — Every provider. One terminal.</title>
+<meta name="description" content="Open-source terminal AI agent. Bring 180+ providers or log in with the Claude/ChatGPT/Gemini subscriptions you already pay for. One 85 MB binary.">
+<meta property="og:title" content="GoatCode — Every provider. One terminal. Never stop coding.">
+<meta property="og:description" content="Open-source terminal AI agent with mid-turn provider failover. 180+ providers. One binary.">
+<meta property="og:image" content="assets/social.png">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0A0908">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230A0908'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='18' font-weight='bold' fill='%238A2032' text-anchor='middle'%3EG%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ============ palette — 0A0908 / 49111C / F2F4F3, tints derived, nothing else ============ */
+:root {
+  --bg:        #0A0908; /* page */
+  --panel:     #16100F; /* chrome, cards (wine-black) */
+  --panel-2:   #1C1315; /* terminal body */
+  --canvas:    #0D0607; /* terminal canvas / code blocks */
+  --border:    #2A1B1F; /* hairlines */
+  --wine:      #49111C; /* brand */
+  --wine-hi:   #8A2032; /* links / CTA — readable wine */
+  --wine-glow: #B23A4E; /* hover, mono labels, checks */
+  --text:      #F2F4F3;
+  --text-2:    #9A918E; /* secondary, warm gray */
+  --badge-bg:  #2A0A10;
+  --badge-fg:  #D9737F;
+  --max: 1120px;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --settle: cubic-bezier(0.22, 1, 0.36, 1); /* ease-out-quint — spring-style settle */
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 16px/1.6 var(--sans);
+  font-feature-settings: "cv01", "ss03";
+  -webkit-font-smoothing: antialiased;
+}
+img { max-width: 100%; display: block; }
+a { color: var(--wine-hi); text-decoration: none; }
+a:hover { color: var(--wine-glow); }
+.wrap { max-width: var(--max); margin: 0 auto; padding-inline: 24px; }
+code { font: 500 .92em/1 var(--mono); color: var(--text); }
+h2 { font: 600 clamp(26px, 3vw, 34px)/1.15 var(--sans); letter-spacing: -0.02em; margin: 0 0 14px; }
+.kicker { font: 500 12px/1 var(--mono); color: var(--wine-glow); letter-spacing: .08em; text-transform: uppercase; margin: 0 0 18px; }
+.lede { color: var(--text-2); margin: 0; max-width: 62ch; }
+section h2 + .lede { margin-bottom: 0; }
+
+/* ============ nav ============ */
+.nav {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.nav-inner {
+  max-width: var(--max); margin: 0 auto; padding-inline: 24px;
+  height: 56px; display: flex; align-items: center; gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 600; font-size: 15px; }
+.brand:hover { color: var(--text); }
+.brand .mark { font: 700 13px/1 var(--mono); color: var(--wine-glow); letter-spacing: -1px; }
+.nav-links { display: flex; gap: 18px; margin-left: 10px; }
+.nav-links a { font: 500 14px/1 var(--sans); color: var(--text-2); }
+.nav-links a:hover, .nav-links a[aria-current="true"] { color: var(--text); }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 500 12px/1 var(--mono);
+  color: var(--text-2);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 6px 11px; white-space: nowrap;
+}
+.pill:hover { color: var(--text); border-color: var(--wine-hi); }
+.pill .star { color: var(--wine-glow); }
+.nav-install { font: 500 14px/1 var(--sans); color: var(--wine-hi); padding: 6px 2px; }
+.nav-install:hover { color: var(--wine-glow); }
+.prog { position: absolute; left: 0; bottom: -1px; height: 1px; width: 100%; background: var(--wine-hi); transform: scaleX(0); transform-origin: 0 50%; }
+
+/* ============ hero ============ */
+.hero { padding: 88px 0 72px; }
+.hero-grid { display: flex; gap: 56px; align-items: center; }
+.hero-copy { flex: 0 1 55%; min-width: 0; }
+.hero-visual { flex: 1 1 45%; min-width: 0; }
+h1 {
+  margin: 0 0 20px;
+  font: 600 clamp(38px, 5.2vw, 64px)/1.05 var(--sans);
+  letter-spacing: -0.03em;
+}
+.sub { margin: 0 0 30px; color: var(--text-2); font-size: 16px; max-width: 46ch; }
+.sub strong { color: var(--text); font-weight: 500; }
+
+/* install chip (shared) */
+.chip {
+  display: inline-flex; align-items: center; gap: 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 13px 16px; cursor: pointer; user-select: none;
+  font: 500 14px/1 var(--mono); color: var(--text);
+}
+.chip:hover { border-color: var(--wine-hi); }
+.chip:active { transform: scale(0.98); }
+.chip .dollar { color: var(--text-2); }
+.chip .cmd { color: var(--wine-hi); }
+.chip .copy-ico { width: 15px; height: 15px; flex: none; stroke: var(--text-2); }
+.chip .done { display: none; color: var(--wine-glow); font: 500 12px/1 var(--mono); }
+.chip.copied .done { display: inline; }
+.chip.copied .copy-ico { display: none; }
+
+/* provider chips */
+.providers { padding: 8px 0 88px; }
+.providers-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pchip {
+  font: 500 12px/1 var(--mono); color: var(--text-2);
+  border: 1px solid var(--border); border-radius: 999px; padding: 7px 12px;
+}
+.pchip.more { color: var(--wine-glow); border-color: var(--wine); }
+.providers-label { font: 400 12px/1 var(--mono); color: var(--text-2); margin: 0 0 14px; }
+
+/* terminal mock */
+.term {
+  background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  transform: perspective(1600px) rotateY(4deg);
+  box-shadow: 0 24px 60px rgba(0,0,0,.55);
+  transition: transform .35s var(--settle), box-shadow .35s var(--settle);
+}
+.term:hover {
+  transform: perspective(1600px) rotateY(0deg) translateY(-2px);
+  box-shadow: 0 30px 70px rgba(0,0,0,.6);
+}
+.term-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 14px; border-bottom: 1px solid var(--border);
+}
+.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--wine); }
+.dot:nth-child(2) { background: #3A2326; }
+.dot:nth-child(3) { background: #241A19; }
+.term-title { margin-left: 8px; font: 400 12px/1 var(--mono); color: var(--text-2); }
+.term img { display: block; width: 100%; height: auto; background: var(--canvas); }
+
+/* ============ stats band ============ */
+.stats { border-block: 1px solid var(--border); background: var(--panel); }
+.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); }
+.stat { padding: 34px 24px; text-align: center; }
+.stat + .stat { border-left: 1px solid var(--border); }
+.stat .num { font: 600 30px/1.1 var(--mono); letter-spacing: -0.02em; color: var(--text); }
+.stat .num em { font-style: normal; color: var(--wine-glow); }
+.stat .cap { margin-top: 6px; font: 400 12.5px/1.4 var(--sans); color: var(--text-2); }
+
+/* ============ killer feature strip ============ */
+.strip { border-bottom: 1px solid var(--border); padding: 96px 0; }
+.strip-grid { display: flex; gap: 64px; align-items: flex-start; }
+.strip-visual { flex: 1 1 58%; min-width: 0; }
+.strip-copy { flex: 1 1 42%; min-width: 0; padding-top: 6px; }
+.strip h2 { font-size: clamp(28px, 3.2vw, 40px); }
+.strip p { margin: 0 0 14px; color: var(--text-2); max-width: 40ch; }
+.strip p strong { color: var(--text); font-weight: 500; }
+
+/* demo tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.tab {
+  font: 500 12px/1 var(--mono); color: var(--text-2);
+  background: transparent; border: 1px solid var(--border); border-radius: 8px;
+  padding: 9px 13px; cursor: pointer;
+}
+.tab:hover { color: var(--text); border-color: var(--wine-hi); }
+.tab[aria-selected="true"] { color: var(--text); background: var(--panel); border-color: var(--wine-hi); }
+.frame { position: relative; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--canvas); box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+.frame img { width: 100%; height: auto; }
+.frame figcaption {
+  position: absolute; right: 10px; bottom: 10px;
+  font: 500 11px/1 var(--mono); color: var(--text-2);
+  background: rgba(13,6,7,.82); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 9px;
+}
+.panel[hidden] { display: none; }
+.credibility { margin-top: 12px; font: 400 12px/1.5 var(--mono); color: var(--text-2); }
+
+/* ============ code blocks ============ */
+pre.code {
+  background: var(--canvas); border: 1px solid var(--border); border-radius: 10px;
+  padding: 16px 18px; overflow-x: auto; margin: 18px 0 0;
+  font: 400 13px/1.7 var(--mono); color: var(--text-2);
+}
+pre.code .ok { color: var(--wine-glow); }
+pre.code .c { color: #5A5250; }
+pre.code strong { color: var(--text); font-weight: 500; }
+
+/* ============ comparison table ============ */
+.compare { border-bottom: 1px solid var(--border); padding: 96px 0; }
+.table-scroll { overflow-x: auto; margin-top: 40px; border: 1px solid var(--border); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 14px; }
+th, td { padding: 13px 18px; text-align: left; vertical-align: top; }
+thead th {
+  font: 500 12px/1 var(--mono); letter-spacing: .04em; color: var(--text-2);
+  background: var(--panel); border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+tbody tr + tr td { border-top: 1px solid var(--border); }
+td.feat { color: var(--text); font-weight: 500; white-space: nowrap; }
+td.goat { background: rgba(73,17,28,.18); color: var(--text); }
+th.goat { color: var(--wine-glow); }
+td.other { color: var(--text-2); }
+.yes { color: var(--wine-glow); font-weight: 700; }
+.no { color: #5A5250; }
+.compare .note { margin-top: 18px; font: 400 13px/1.6 var(--sans); color: var(--text-2); }
+
+/* ============ v3 pillars ============ */
+.pillars { border-bottom: 1px solid var(--border); padding: 96px 0; }
+
+/* ============ feature grid ============ */
+.features { border-bottom: 1px solid var(--border); padding: 96px 0; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 40px; }
+.grid.two { grid-template-columns: repeat(2, 1fr); }
+.card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 22px 22px 24px;
+  transition: border-color .2s var(--settle), transform .2s var(--settle);
+}
+.card:hover { border-color: var(--wine-hi); transform: translateY(-2px); }
+.card .label {
+  display: block; margin-bottom: 10px;
+  font: 500 13px/1 var(--mono); color: var(--wine-glow);
+}
+.card.goat .label {
+  color: var(--badge-fg); background: var(--badge-bg);
+  display: inline-block; padding: 4px 8px; border-radius: 6px; margin: 0 0 10px -4px;
+}
+.card p { margin: 0; color: var(--text-2); font-size: 14.5px; }
+.card .cmd-line { display: block; margin-top: 12px; font: 500 12.5px/1.6 var(--mono); color: var(--wine-hi); word-break: break-all; }
+
+/* ============ auth / subscriptions ============ */
+.auth { border-bottom: 1px solid var(--border); padding: 96px 0; }
+.auth-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 40px; }
+.sub-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 20px;
+}
+.sub-card .who { font: 600 15px/1 var(--sans); margin-bottom: 10px; }
+.sub-card code { display: block; font: 500 12.5px/1.5 var(--mono); color: var(--wine-hi); word-break: break-all; }
+.auth .fine { margin-top: 22px; font: 400 13px/1.7 var(--sans); color: var(--text-2); max-width: 72ch; }
+
+/* ============ split sections (desktop control) ============ */
+.split { border-bottom: 1px solid var(--border); padding: 96px 0; }
+.split-grid { display: flex; gap: 64px; align-items: center; }
+.split-copy, .split-visual { flex: 1 1 50%; min-width: 0; }
+.split p { color: var(--text-2); margin: 0 0 14px; }
+.split p strong { color: var(--text); font-weight: 500; }
+.prompt-example {
+  background: var(--canvas); border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px; font: 500 13.5px/1.6 var(--mono); color: var(--text);
+}
+.prompt-example .caret { color: var(--wine-glow); }
+
+/* ============ slash commands ============ */
+.commands { border-bottom: 1px solid var(--border); padding: 96px 0; }
+.cmd-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 40px; }
+.cmd-item {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 11px 13px;
+}
+.cmd-item .c { font: 500 13px/1 var(--mono); color: var(--wine-hi); }
+.cmd-item .d { font: 400 12px/1.4 var(--sans); color: var(--text-2); margin-top: 5px; }
+.keys-note {
+  margin-top: 22px; font: 400 13px/1.8 var(--mono); color: var(--text-2);
+}
+.keys-note kbd {
+  font: 500 11.5px/1 var(--mono); color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 5px; padding: 3px 6px;
+}
+.keys-note .gm { color: var(--badge-fg); }
+
+/* ============ quick start / install ============ */
+.quickstart { border-bottom: 1px solid var(--border); padding: 96px 0; }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 40px; }
+.step { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 22px; }
+.step .n { font: 500 12px/1 var(--mono); color: var(--text-2); margin-bottom: 14px; display: block; }
+.step .cmd { font: 500 14px/1.5 var(--mono); color: var(--wine-hi); word-break: break-all; }
+.step p { margin: 10px 0 0; font-size: 14px; color: var(--text-2); }
+.alt-install { margin-top: 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.alt-install .box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+.alt-install .t { font: 500 12px/1 var(--mono); color: var(--text-2); margin-bottom: 12px; }
+.alt-install code { display: block; font: 400 12.5px/1.8 var(--mono); color: var(--wine-hi); word-break: break-all; }
+.bins { margin-top: 22px; font: 400 12.5px/1.8 var(--mono); color: var(--text-2); }
+.bins span { color: var(--text); }
+
+/* ============ FAQ ============ */
+.faq { border-bottom: 1px solid var(--border); padding: 96px 0; }
+.faq details { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); margin-top: 12px; }
+.faq summary {
+  cursor: pointer; list-style: none; padding: 18px 22px;
+  font: 500 15.5px/1.4 var(--sans); color: var(--text);
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; font: 400 18px/1 var(--mono); color: var(--wine-glow); transition: transform .2s var(--settle); }
+.faq details[open] summary::after { transform: rotate(45deg); }
+.faq .a { padding: 0 22px 20px; color: var(--text-2); font-size: 14.5px; }
+.faq .a code { color: var(--wine-hi); }
+
+/* ============ CTA ============ */
+.cta { padding: 110px 0; text-align: center; }
+.cta h2 { font-size: clamp(30px, 3.6vw, 44px); letter-spacing: -0.025em; margin-bottom: 26px; }
+.cta .after { margin-top: 18px; font: 400 13px/1 var(--mono); color: var(--text-2); }
+
+/* ============ footer ============ */
+footer { border-top: 1px solid var(--border); padding: 28px 0; }
+.foot {
+  max-width: var(--max); margin: 0 auto; padding-inline: 24px;
+  display: flex; gap: 22px; align-items: center; flex-wrap: wrap;
+  font: 400 13px/1 var(--mono); color: var(--text-2);
+}
+.foot a { color: var(--text-2); }
+.foot a:hover { color: var(--wine-glow); }
+.foot .sep { color: var(--border); }
+.foot .mark { font-weight: 700; color: var(--wine-glow); letter-spacing: -1px; }
+.foot .top { margin-left: auto; }
+
+/* ============ reveal ============ */
+.rv { opacity: 0; transform: translateY(8px); transition: opacity .3s var(--settle), transform .3s var(--settle); }
+.rv.on { opacity: 1; transform: none; }
+button, a { transition: color 120ms var(--settle), border-color 120ms var(--settle), transform 100ms var(--settle); }
+.pill:active { transform: scale(0.98); }
+:focus-visible { outline: 2px solid var(--wine-glow); outline-offset: 3px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) {
+  .rv { opacity: 1; transform: none; transition: none; }
+  .term, .term:hover { transform: none; }
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+/* ============ responsive ============ */
+@media (max-width: 900px) {
+  .hero { padding: 56px 0 48px; }
+  .hero-grid, .strip-grid, .split-grid { flex-direction: column; gap: 40px; }
+  .hero-copy, .hero-visual, .strip-visual, .strip-copy, .split-visual, .split-copy { flex: 1 1 auto; width: 100%; }
+  .strip-copy { padding-top: 0; }
+  .term { transform: none; }
+  .grid, .grid.two, .steps, .auth-grid, .alt-install { grid-template-columns: 1fr 1fr; }
+  .cmd-grid { grid-template-columns: 1fr 1fr; }
+  .stats-row { grid-template-columns: 1fr 1fr; }
+  .stat:nth-child(3) { border-left: none; }
+  .stat:nth-child(n+3) { border-top: 1px solid var(--border); }
+  .strip, .features, .quickstart, .compare, .auth, .commands, .split, .faq, .pillars { padding: 72px 0; }
+  .nav-links { display: none; }
+}
+@media (max-width: 620px) {
+  .grid, .grid.two, .steps, .auth-grid, .alt-install, .cmd-grid { grid-template-columns: 1fr; }
+  .pill.stars-pill, .pill.npm-pill { display: none; }
+}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top"><span class="mark">▄███▄</span> GoatCode</a>
+    <div class="nav-links">
+      <a href="#v3">v3</a>
+      <a href="#failover">Failover</a>
+      <a href="#compare">Compare</a>
+      <a href="#commands">Commands</a>
+      <a href="#quickstart">Quick start</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <div class="nav-right">
+      <a class="pill stars-pill" href="https://github.com/Arhan-w/GoatCode/stargazers" target="_blank" rel="noopener"><span class="star">★</span> <span id="stars">GitHub</span></a>
+      <a class="pill npm-pill" href="https://www.npmjs.com/package/goatcode-cli" target="_blank" rel="noopener">v<span id="npmv">2.1.10</span></a>
+      <a class="nav-install" href="#install">Install</a>
+    </div>
+  </div>
+  <div class="prog" id="prog" aria-hidden="true"></div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <p class="kicker rv" style="margin-bottom:14px">v3.3.0 — crash recovery · session branching · doctor diagnostics</p>
+      <h1 class="rv">Every provider.<br>One terminal.<br>Never stop coding.</h1>
+      <p class="sub rv">The autonomous <strong>multi-repo</strong> AI coding agent for your terminal. <strong>Boots free with zero config</strong> — or bring <strong>180+ providers</strong> and the Claude/ChatGPT/Gemini subscriptions you already pay for. <strong>One 85&nbsp;MB binary.</strong> No accounts. No lock-in. With crash recovery, session branching, and an 8-point health check.</p>
+      <div id="install">
+        <button class="chip rv" id="chip" type="button" aria-label="Copy install command">
+          <span class="dollar">$</span><span class="cmd" id="cmd">npm install -g goatcode-cli</span>
+          <svg class="copy-ico" viewBox="0 0 16 16" fill="none" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M3.5 10.5h-1a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1"/></svg>
+          <span class="done">copied ✓</span>
+        </button>
+      </div>
+    </div>
+    <div class="hero-visual rv">
+      <div class="term">
+        <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="term-title">goat — zsh</span></div>
+        <img src="assets/demo-read.gif" alt="GoatCode terminal session doing real work: streaming agent turn with live tool calls and results" width="1004" height="620" loading="eager">
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="providers">
+  <div class="wrap">
+    <p class="providers-label rv">Speaks to all of them, natively:</p>
+    <div class="providers-row">
+      <span class="pchip rv">Anthropic</span>
+      <span class="pchip rv">OpenAI</span>
+      <span class="pchip rv">Google</span>
+      <span class="pchip rv">Mistral</span>
+      <span class="pchip rv">Groq</span>
+      <span class="pchip rv">DeepSeek</span>
+      <span class="pchip rv">xAI</span>
+      <span class="pchip rv">OpenRouter</span>
+      <span class="pchip rv">Bedrock</span>
+      <span class="pchip rv">Azure</span>
+      <span class="pchip rv">Ollama</span>
+      <span class="pchip rv">LM Studio</span>
+      <span class="pchip rv">Copilot</span>
+      <span class="pchip rv">Kimi</span>
+      <span class="pchip rv">Together</span>
+      <span class="pchip rv">Fireworks</span>
+      <span class="pchip more rv">+165 more</span>
+    </div>
+  </div>
+</section>
+
+<section class="stats">
+  <div class="wrap stats-row">
+    <div class="stat rv"><div class="num"><em data-count="180">180</em>+</div><div class="cap">providers &amp; subscription logins</div></div>
+    <div class="stat rv"><div class="num"><em data-count="85">85</em>&nbsp;MB</div><div class="cap">single binary, 5 platforms</div></div>
+    <div class="stat rv"><div class="num"><em data-count="90">90</em>%</div><div class="cap">cheaper sessions with prompt caching</div></div>
+    <div class="stat rv"><div class="num"><em data-count="40">40</em></div><div class="cap">slash commands, zero context switches</div></div>
+  </div>
+</section>
+
+<section class="pillars" id="v3">
+  <div class="wrap">
+    <p class="kicker rv">What's new in v3</p>
+    <h2 class="rv">Five pillars, one binary</h2>
+    <p class="lede rv">A major architectural leap: sub-second code intelligence and team collaboration without leaving the terminal.</p>
+    <div class="grid">
+      <div class="card rv"><span class="label">⛶ Multi-repo workspaces</span><p>Mount several repos at once — cross-repo search, per-repo sandboxes, strict permission rules. <code>workspace.repos</code> does it.</p><span class="cmd-line">/find resolveRepos · /index</span></div>
+      <div class="card rv"><span class="label">✺ Code intelligence graph</span><p>Zero-config tree-sitter parser (TS · JS · Python · Go) with WASM fallback. Incremental mtime+size fast path, atomic persistence, TF-IDF ranked symbol lookup.</p><span class="cmd-line">/index → /find &lt;symbol&gt;</span></div>
+      <div class="card rv"><span class="label">⇄ P2P collab relay</span><p>End-to-end-encrypted WebSocket relay — Lamport timestamp sequencing, invite codes, turn-tokens, live peer sync. Share your session with a teammate.</p><span class="cmd-line">/share · /peers · /handoff</span></div>
+      <div class="card rv"><span class="label">⛁ Agent-as-a-Service</span><p>JSON-RPC 2.0 over HTTP and WebSocket. Constant-time token auth, path-jailed execution, remote agent mounting — mount a teammate's agent as <code>remote_&lt;name&gt;</code>.</p><span class="cmd-line">POST /rpc</span></div>
+      <div class="card rv"><span class="label">⛓ Signed plugin marketplace</span><p>Browse and install community plugins verified with ed25519 signatures against pinned keys — secure tar extractor with path-traversal and bomb guards.</p><span class="cmd-line">/marketplace</span></div>
+      <div class="card rv"><span class="label">⌥ Noir theme</span><p>Recrafted terminal UI — true-black <code>#000F08</code> input, deep <code>#25262D</code> panels, violet accents. Every GIF on this page runs in it.</p><span class="cmd-line">it's just how it looks now</span></div>
+      <div class="card rv"><span class="label">⚡ Goated-Flash-Free</span><p>No API key yet? GoatCode auto-boots an embedded free inference engine on loopback — full AI coding out of the box, zero setup, $0. <code>/model flash</code> anytime.</p><span class="cmd-line">goat  ← literally just this</span></div>
+      <div class="card rv"><span class="label">◈ Session branching</span><p>Fork conversations with <code>/fork</code> — create child sessions that share history up to the branch point. Track all branches in the parent session's metadata.</p><span class="cmd-line">/fork · /resume</span></div>
+      <div class="card rv"><span class="label">☠ Crash recovery</span><p>Append-only session persistence with crash recovery markers. Resume interrupted sessions via <code>/recover</code> — replay pending tool calls and never lose progress.</p><span class="cmd-line">/recover</span></div>
+      <div class="card rv"><span class="label">⚕ Doctor diagnostics</span><p>Run <code>/doctor</code> for a comprehensive 8-point system health check covering providers, configs, credentials, and network connectivity.</p><span class="cmd-line">/doctor</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="strip" id="failover">
+  <div class="wrap strip-grid">
+    <div class="strip-visual rv">
+      <div class="tabs" role="tablist" aria-label="GoatCode demos">
+        <button class="tab" role="tab" id="t-failover" aria-controls="p-failover" aria-selected="true">failover</button>
+        <button class="tab" role="tab" id="t-code" aria-controls="p-code" aria-selected="false">code graph</button>
+        <button class="tab" role="tab" id="t-collab" aria-controls="p-collab" aria-selected="false">collab</button>
+        <button class="tab" role="tab" id="t-share" aria-controls="p-share" aria-selected="false">share</button>
+        <button class="tab" role="tab" id="t-flash" aria-controls="p-flash" aria-selected="false">flash</button>
+        <button class="tab" role="tab" id="t-ultra" aria-controls="p-ultra" aria-selected="false">ultraplan</button>
+        <button class="tab" role="tab" id="t-goatmode" aria-controls="p-goatmode" aria-selected="false">goat mode</button>
+        <button class="tab" role="tab" id="t-diff" aria-controls="p-diff" aria-selected="false">diffs</button>
+        <button class="tab" role="tab" id="t-write" aria-controls="p-write" aria-selected="false">write</button>
+        <button class="tab" role="tab" id="t-todo" aria-controls="p-todo" aria-selected="false">todo</button>
+        <button class="tab" role="tab" id="t-read" aria-controls="p-read" aria-selected="false">read</button>
+        <button class="tab" role="tab" id="t-config" aria-controls="p-config" aria-selected="false">config</button>
+      </div>
+      <figure class="frame panel" id="p-failover" role="tabpanel" aria-labelledby="t-failover" tabindex="0" style="margin:0">
+        <img src="assets/demo-failover.gif" alt="GoatCode hitting 429 retries and switching to a fallback provider mid-turn, finishing the answer" width="1004" height="767" loading="lazy">
+        <figcaption>429 retries → ⇢ switched provider → answer</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-code" role="tabpanel" aria-labelledby="t-code" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-code.gif" alt="GoatCode running /index to build the workspace code graph, then /find ranking symbols across repos" width="1004" height="620" loading="lazy">
+        <figcaption>/index builds the code graph → /find ranks symbols across repos</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-collab" role="tabpanel" aria-labelledby="t-collab" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-collab.gif" alt="GoatCode real-time P2P relay collaboration — presence, turn tokens, and peer chat over an invite code" width="1004" height="557" loading="lazy">
+        <figcaption>live relay collab — presence, turn tokens, peer chat</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-share" role="tabpanel" aria-labelledby="t-share" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-share.gif" alt="GoatCode generating a collab invite code and joining a shared workspace session" width="1004" height="494" loading="lazy">
+        <figcaption>/share mints an invite code → teammate joins the session</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-flash" role="tabpanel" aria-labelledby="t-flash" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-flash.gif" alt="GoatCode with no API key set auto-boots the embedded Goated-Flash-Free server and answers instantly on loopback" width="1004" height="578" loading="lazy">
+        <figcaption>no keys? goat auto-boots Goated-Flash-Free — free, on loopback</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-ultra" role="tabpanel" aria-labelledby="t-ultra" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-ultra.gif" alt="GoatCode /ultraplan decomposing a goal into parallel scout subagents that fan out and synthesize one prioritized plan" width="1004" height="767" loading="lazy">
+        <figcaption>/ultraplan → parallel scouts fan out → one prioritized plan</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-goatmode" role="tabpanel" aria-labelledby="t-goatmode" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-goatmode.gif" alt="GoatCode permission dialog dismissed by shift+tab into GOAT MODE, then the write streams its inline diff with no prompts" width="1004" height="620" loading="lazy">
+        <figcaption>shift+tab×3 → 🐐 GOAT MODE — open prompt resolved, zero clicks</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-diff" role="tabpanel" aria-labelledby="t-diff" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-diff.gif" alt="GoatCode printing an inline unified diff after a write, with live context meter" width="1004" height="767" loading="lazy">
+        <figcaption>inline diff + live ctx meter in the footer</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-write" role="tabpanel" aria-labelledby="t-write" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-write.gif" alt="GoatCode writing a file with permission prompt" width="1004" height="620" loading="lazy">
+        <figcaption>write tool — permission-gated, undo stack</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-todo" role="tabpanel" aria-labelledby="t-todo" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-todo.gif" alt="GoatCode tracking a multi-step todo list while working" width="1004" height="725" loading="lazy">
+        <figcaption>todo planning + file tools</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-read" role="tabpanel" aria-labelledby="t-read" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-read.gif" alt="GoatCode streaming agent turn with live tool calls and results" width="1004" height="620" loading="lazy">
+        <figcaption>streaming agent turn — live tool calls and results</figcaption>
+      </figure>
+      <figure class="frame panel" id="p-config" role="tabpanel" aria-labelledby="t-config" tabindex="0" hidden style="margin:0">
+        <img src="assets/demo-config.gif" alt="GoatCode configuration UI showing workspace repos, providers, models, and permissions" width="1004" height="767" loading="lazy">
+        <figcaption>configuration UI — repos, providers, models, permissions, flash model, hooks, skills, plugins</figcaption>
+      </figure>
+      <p class="credibility rv">pty-captured recordings of the real TUI — real renderer, real agent loop, never a mock-up.</p>
+    </div>
+    <div class="strip-copy">
+      <p class="kicker rv">Mid-turn failover</p>
+      <h2 class="rv">Quota dies at 2&nbsp;AM?</h2>
+      <p class="rv">GoatCode retries the provider, <strong>walks your fallback chain live</strong> — switches, says so, and finishes the answer. No crash, no lost context.</p>
+      <p class="rv">The switch is sticky: <strong>the next launch starts on the provider that worked.</strong></p>
+      <pre class="code rv">goat config set fallback-models \
+  '<strong>["openrouter/claude-sonnet","groq/llama-3.3-70b",
+   "deepseek/deepseek-chat"]</strong>'</pre>
+      <p class="rv" style="margin-top:16px;font-size:14px">Background work gets its own budget too: set <code>small_model</code> and compaction + explore-subagents route to the cheap model while your main turn stays on the frontier one.</p>
+    </div>
+  </div>
+</section>
+
+<section class="compare" id="compare">
+  <div class="wrap">
+    <p class="kicker rv">Why GoatCode</p>
+    <h2 class="rv">Coding agents are great until they<br>ask you to subscribe to them.</h2>
+    <p class="lede rv">Your terminal, your keys, your existing plans. Not a comparison chart trick — every cell is a feature you can test in sixty seconds.</p>
+    <div class="table-scroll rv">
+      <table>
+        <thead>
+          <tr><th></th><th class="goat">▄███▄ GoatCode v3</th><th>Claude Code</th><th>Codex CLI</th><th>OpenCode</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="feat">Cost to start</td><td class="goat"><strong>$0, MIT + free built-in model</strong></td><td class="other">proprietary</td><td class="other">proprietary</td><td class="other">MIT</td></tr>
+          <tr><td class="feat">Providers</td><td class="goat"><strong>180+</strong> + any compatible endpoint</td><td class="other">Anthropic only</td><td class="other">OpenAI only</td><td class="other">multi</td></tr>
+          <tr><td class="feat">Use your existing subscriptions</td><td class="goat"><span class="yes">✓</span> OAuth → credentials</td><td class="other">only Anthropic's</td><td class="other">only OpenAI's</td><td class="other">partial</td></tr>
+          <tr><td class="feat">Multi-repo workspace</td><td class="goat"><span class="yes">✓</span> native roots map</td><td class="other">single</td><td class="other">single</td><td class="other">single</td></tr>
+          <tr><td class="feat">Code intelligence</td><td class="goat"><span class="yes">✓</span> tree-sitter + WASM + rank</td><td class="other">basic grep</td><td class="other">basic grep</td><td class="other">basic grep</td></tr>
+          <tr><td class="feat">Collab &amp; relay</td><td class="goat"><span class="yes">✓</span> E2E · Lamport sync · invites</td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td></tr>
+          <tr><td class="feat">Agent-as-a-Service</td><td class="goat"><span class="yes">✓</span> JSON-RPC 2.0 + remote tools</td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td></tr>
+          <tr><td class="feat">Signed plugins</td><td class="goat"><span class="yes">✓</span> ed25519 + bomb guards</td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td></tr>
+          <tr><td class="feat">Config UI</td><td class="goat"><span class="yes">✓</span> repos · providers · models · permissions · flash · hooks · skills · plugins</td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td></tr>
+          <tr><td class="feat">Failover when quota dies</td><td class="goat"><span class="yes">✓</span> built-in, mid-turn</td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td><td class="other">manual</td></tr>
+          <tr><td class="feat">Desktop control (click/type/launch)</td><td class="goat"><span class="yes">✓</span> built-in</td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td></tr>
+          <tr><td class="feat">MCP / skills / plugins</td><td class="goat"><span class="yes">✓ ✓ ✓</span></td><td class="other">✓ · plugins ✗</td><td class="other"><span class="no">—</span></td><td class="other">✓</td></tr>
+          <tr><td class="feat">Single static binary</td><td class="goat"><span class="yes">✓</span> Bun-compiled, 5 platforms</td><td class="other">Node</td><td class="other">Node</td><td class="other">various</td></tr>
+          <tr><td class="feat">Prompt caching + live cost in USD</td><td class="goat"><span class="yes">✓</span> automatic, /cost</td><td class="other">silent</td><td class="other"><span class="no">—</span></td><td class="other">varies</td></tr>
+          <tr><td class="feat">/rewind — transcript + files restored</td><td class="goat"><span class="yes">✓</span></td><td class="other">✓</td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td></tr>
+          <tr><td class="feat">Session search across all history</td><td class="goat"><span class="yes">✓</span> /search</td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td><td class="other"><span class="no">—</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note rv">Features differ by vendor version — spot-check anytime: <code>goat --help</code> lists everything.</p>
+  </div>
+</section>
+
+<section class="auth">
+  <div class="wrap">
+    <p class="kicker rv">Log in, don't sign up</p>
+    <h2 class="rv">Your subscriptions, as API credentials</h2>
+    <p class="lede rv">Browser / device OAuth — one command each. No new accounts, no extra invoices.</p>
+    <div class="auth-grid">
+      <div class="sub-card rv"><div class="who">Claude Pro / Max</div><code>goat auth claude --oauth</code></div>
+      <div class="sub-card rv"><div class="who">ChatGPT (Codex)</div><code>goat auth codex --oauth</code></div>
+      <div class="sub-card rv"><div class="who">Gemini</div><code>goat auth gemini --oauth</code></div>
+      <div class="sub-card rv"><div class="who">Kimi</div><code>goat auth kimi --oauth</code></div>
+      <div class="sub-card rv"><div class="who">Grok</div><code>goat auth grok --oauth</code></div>
+      <div class="sub-card rv"><div class="who">GitHub Copilot</div><code>goat auth github-copilot --oauth</code></div>
+    </div>
+    <p class="fine rv">API-key providers too — OpenAI, DeepSeek, Groq, Mistral, Together, Fireworks, xAI, OpenRouter, Moonshot, Cerebras, Ollama, LM Studio, llama.cpp… set the usual env var or <code>goat auth &lt;id&gt; --key</code>. Any endpoint speaking OpenAI / Anthropic / Gemini wire formats slots in with <code>goat addp</code>. Check what resolves: <code>goat providers --check</code>.</p>
+  </div>
+</section>
+
+<section class="split">
+  <div class="wrap split-grid">
+    <div class="split-copy">
+      <p class="kicker rv">Computer use</p>
+      <h2 class="rv">It actually drives your machine</h2>
+      <p class="rv">The <code>computer</code> tool <strong>clicks, types, scrolls, launches apps, and reads what's on screen</strong> — vision included, screenshots go straight into the model.</p>
+      <p class="rv">Permission-gated by default: every destructive action asks — or plan/bypass modes decide per-session.</p>
+      <p class="rv">And reads are parallelized — a five-file exploration costs one round-trip, not five.</p>
+    </div>
+    <div class="split-visual rv">
+      <div class="term">
+        <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="term-title">goat — zsh</span></div>
+        <div style="padding: 20px">
+          <div class="prompt-example"><span class="caret">&gt;</span> open the settings and tell me which<br>&nbsp; extension is using the most disk</div>
+          <img src="assets/demo-todo.png" alt="GoatCode todo planning and file tools while driving the desktop" loading="lazy">
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="features">
+  <div class="wrap">
+    <p class="kicker rv">Extensible</p>
+    <h2 class="rv">MCP · Skills · Plugins · Hooks</h2>
+    <div class="grid">
+      <div class="card rv"><span class="label">⛁ MCP servers</span><p>Add any stdio / http / sse server — their tools land beside the built-ins.</p><span class="cmd-line">goat mcp add context7 npx -y @upstash/context7-mcp</span></div>
+      <div class="card rv"><span class="label">✦ SKILL.md skills</span><p>Drop a folder into <code>~/.goatcode/skills/</code>. Progressive disclosure keeps context lean. <code>/skills</code> lists everything loaded.</p></div>
+      <div class="card rv"><span class="label">⚄ Plugins</span><p>One config line points at a directory of commands + skills. <code>/plugin reload</code> picks up edits live.</p></div>
+      <div class="card rv"><span class="label">⛓ Hooks</span><p>Claude-Code-compatible <code>PreToolUse</code> / <code>PostToolUse</code> / <code>Stop</code> shell hooks. Guardrails as code, not vibes.</p></div>
+      <div class="card rv"><span class="label">▤ GOAT.md</span><p>Project memory loaded into every session. <code>/init</code> drafts it from a real read of your codebase — commands, architecture, gotchas with file:line examples.</p></div>
+      <div class="card rv"><span class="label">⟳ self-update</span><p><code>goat self-update</code> swaps the running binary for the latest release atomically. The TUI hints the moment a release lands.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="features" style="border-top:none">
+  <div class="wrap">
+    <p class="kicker rv">Toolbox</p>
+    <h2 class="rv">Built for the long session</h2>
+    <div class="grid">
+      <div class="card rv"><span class="label">⚡ Prompt caching</span><p>System prompt + tools cached between turns — repeated context bills at 10% of input price. Savings shown live in <code>/cost</code>.</p></div>
+      <div class="card rv"><span class="label">⎿ Inline diffs</span><p>Every edit prints its colored diff the moment it lands. <code>/rewind 4</code> restores transcript <em>and</em> files to turn 4.</p></div>
+      <div class="card goat rv"><span class="label">🐐 GOAT MODE</span><p>Bypass permissions that actually bypasses — every tool auto-approves, mid-turn, no prompts.</p></div>
+      <div class="card rv"><span class="label">⧉ /ultraplan fan-out</span><p>Decomposes a goal into parallel scout subagents, then merges one prioritized plan — dispatched in a single command.</p></div>
+      <div class="card rv"><span class="label">⌕ /search</span><p>Full-text search across every saved session.</p></div>
+      <div class="card rv"><span class="label">⌨ @file + aliases</span><p><code>@file</code> completion and <code>/model sonnet</code> shortcuts.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="commands" id="commands">
+  <div class="wrap">
+    <p class="kicker rv">Slash commands</p>
+    <h2 class="rv">Forty commands. Zero context switches.</h2>
+    <div class="cmd-grid">
+      <div class="cmd-item rv"><span class="c">/model</span><div class="d">switch model, aliases</div></div>
+      <div class="cmd-item rv"><span class="c">/index</span><div class="d">build code graph</div></div>
+      <div class="cmd-item rv"><span class="c">/find</span><div class="d">ranked symbol search</div></div>
+      <div class="cmd-item rv"><span class="c">/ultraplan</span><div class="d">parallel scout fan-out</div></div>
+      <div class="cmd-item rv"><span class="c">/share</span><div class="d">start collab relay</div></div>
+      <div class="cmd-item rv"><span class="c">/peers</span><div class="d">list live peers</div></div>
+      <div class="cmd-item rv"><span class="c">/handoff</span><div class="d">pass turn-token</div></div>
+      <div class="cmd-item rv"><span class="c">/marketplace</span><div class="d">signed plugins</div></div>
+      <div class="cmd-item rv"><span class="c">/rewind</span><div class="d">back to any turn</div></div>
+      <div class="cmd-item rv"><span class="c">/auth</span><div class="d">login flow</div></div>
+      <div class="cmd-item rv"><span class="c">/mcp</span><div class="d">manage servers</div></div>
+      <div class="cmd-item rv"><span class="c">/skills</span><div class="d">list skills</div></div>
+      <div class="cmd-item rv"><span class="c">/sessions</span><div class="d">history</div></div>
+      <div class="cmd-item rv"><span class="c">/resume</span><div class="d">pick one and continue</div></div>
+      <div class="cmd-item rv"><span class="c">/new</span><div class="d">fresh session</div></div>
+      <div class="cmd-item rv"><span class="c">/compact</span><div class="d">fold context</div></div>
+      <div class="cmd-item rv"><span class="c">/search</span><div class="d">all sessions, full-text</div></div>
+      <div class="cmd-item rv"><span class="c">/cost</span><div class="d">this session, live USD</div></div>
+      <div class="cmd-item rv"><span class="c">/usage</span><div class="d">all-time dashboard</div></div>
+      <div class="cmd-item rv"><span class="c">/context</span><div class="d">token window</div></div>
+      <div class="cmd-item rv"><span class="c">/doctor</span><div class="d">health check</div></div>
+      <div class="cmd-item rv"><span class="c">/init</span><div class="d">write GOAT.md</div></div>
+      <div class="cmd-item rv"><span class="c">/review</span><div class="d">code review</div></div>
+      <div class="cmd-item rv"><span class="c">/undo</span><div class="d">revert last edits</div></div>
+      <div class="cmd-item rv"><span class="c">/tasks</span><div class="d">background jobs</div></div>
+      <div class="cmd-item rv"><span class="c">/memory</span><div class="d">show GOAT.md</div></div>
+      <div class="cmd-item rv"><span class="c">/status</span><div class="d">providers + model</div></div>
+      <div class="cmd-item rv"><span class="c">/export</span><div class="d">transcript → md</div></div>
+      <div class="cmd-item rv"><span class="c">/permissions</span><div class="d">session rules</div></div>
+      <div class="cmd-item rv"><span class="c">/plugin</span><div class="d">list · reload</div></div>
+      <div class="cmd-item rv"><span class="c">/providers</span><div class="d">catalog browse</div></div>
+      <div class="cmd-item rv"><span class="c">/models</span><div class="d">per-provider list</div></div>
+      <div class="cmd-item rv"><span class="c">/config</span><div class="d">edit settings</div></div>
+      <div class="cmd-item rv"><span class="c">/rename</span><div class="d">label a session</div></div>
+      <div class="cmd-item rv"><span class="c">/leave</span><div class="d">exit collab</div></div>
+      <div class="cmd-item rv"><span class="c">/logout</span><div class="d">drop credentials</div></div>
+      <div class="cmd-item rv"><span class="c">/clear</span><div class="d">wipe transcript view</div></div>
+      <div class="cmd-item rv"><span class="c">/help</span><div class="d">everything</div></div>
+      <div class="cmd-item rv"><span class="c">/fork</span><div class="d">branch session</div></div>
+      <div class="cmd-item rv"><span class="c">/recover</span><div class="d">crash recovery</div></div>
+      <div class="cmd-item rv"><span class="c">/doctor</span><div class="d">8-point health check</div></div>
+      <div class="cmd-item rv"><span class="c">/quit</span><div class="d">exit</div></div>
+    </div>
+    <p class="keys-note rv"><kbd>shift+tab</kbd> cycles ask → accept-edits → plan → <span class="gm">🐐 GOAT MODE (--bypass)</span> — zero prompts, instant execution &nbsp;·&nbsp; <kbd>ctrl+t</kbd> task panel &nbsp;·&nbsp; <kbd>ctrl+v</kbd> attach image &nbsp;·&nbsp; <kbd>esc</kbd> interrupt</p>
+  </div>
+</section>
+
+<section class="split">
+  <div class="wrap split-grid">
+    <div class="split-copy">
+      <p class="kicker rv">CI &amp; scripts</p>
+      <h2 class="rv">Pipe-native. Machine-readable.</h2>
+      <p class="rv">Print mode reads stdin, writes JSON, and its sessions stay resumable — <code>goat -c</code> picks up where CI left off.</p>
+      <p class="rv">Unknown models show honest zeros and a <em>no price known</em> note instead of a made-up number.</p>
+    </div>
+    <div class="split-visual rv">
+      <pre class="code" style="margin-top:0"><span class="c">$</span> cat error.log | goat -p "why did this fail?" --output-format json
+{
+  <span class="c">"type"</span>: "result",  <span class="c">"is_error"</span>: <span class="ok">false</span>,
+  <span class="c">"session_id"</span>: "…",  <span class="c">"model"</span>: "…",
+  <span class="c">"usage"</span>: { input_tokens: 512, output_tokens: 42 },
+  <span class="c">"cost_usd"</span>: <span class="ok">0.002166</span>
+}
+
+<span class="c">$</span> goat /usage all
+all time · 41 sessions · 1,284,113 in / 204,992 out · <span class="ok">$4.31</span></pre>
+    </div>
+  </div>
+</section>
+
+<section class="quickstart" id="quickstart">
+  <div class="wrap">
+    <p class="kicker rv">Quick start</p>
+    <h2 class="rv">Three commands to goat</h2>
+    <div class="steps">
+      <div class="step rv"><span class="n">01 — install</span><span class="cmd">npm install -g goatcode-cli</span><p>Or zero-install: <code>npx goatcode-cli</code>. Any OS with Node ≥16 — fetches the right binary.</p></div>
+      <div class="step rv"><span class="n">02 — run it, that's it</span><span class="cmd">goat</span><p>No key? It boots <strong>Goated-Flash-Free</strong> — an embedded model, zero setup, $0. Add a provider whenever you want.</p></div>
+      <div class="step rv"><span class="n">03 — level up</span><span class="cmd">goat auth claude --oauth</span><p>Turn your subscription into credentials — or paste a key, <code>/model flash</code> flips back to free anytime.</p></div>
+    </div>
+    <div class="alt-install">
+      <div class="box rv"><div class="t">no npm? one line from the release —</div><code>windows&nbsp;&nbsp; powershell -c "irm …/install.ps1 | iex"<br>unix&nbsp;&nbsp;&nbsp;&nbsp; curl -fsSL …/install.sh | bash</code></div>
+      <div class="box rv"><div class="t">or grab a binary straight from GitHub releases —</div><div class="bins"><span>goat-windows-x64.exe</span> · <span>goat-linux-x64</span> · <span>goat-linux-arm64</span> · <span>goat-darwin-arm64</span> · <span>goat-darwin-x64</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="faq" id="faq">
+  <div class="wrap">
+    <p class="kicker rv">FAQ</p>
+    <h2 class="rv">Fair questions</h2>
+    <details class="rv"><summary>Is it free?</summary><div class="a">Yes — MIT, $0 forever. You only pay whichever providers you choose (or already pay for).</div></details>
+    <details class="rv"><summary>Can it actually use my Claude subscription?</summary><div class="a"><code>goat auth claude --oauth</code> → browser login → credentials, done. Same for ChatGPT, Gemini, Kimi, Grok, and Copilot.</div></details>
+    <details class="rv"><summary>What if a provider dies mid-session?</summary><div class="a">The fallback chain handles it — GoatCode walks the chain mid-turn, switches, and finishes the answer. And the switch is sticky: the next launch starts on the provider that worked.</div></details>
+    <details class="rv"><summary>Windows?</summary><div class="a">First-class. <code>irm | iex</code> install, native computer-use, ConPTY-tested TUI. CI runs on ubuntu, windows <em>and</em> macos on every push.</div></details>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap">
+    <h2 class="rv">Stop babysitting rate limits.</h2>
+    <button class="chip rv" type="button" aria-label="Copy install command">
+      <span class="dollar">$</span><span class="cmd">npm install -g goatcode-cli</span>
+      <svg class="copy-ico" viewBox="0 0 16 16" fill="none" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M3.5 10.5h-1a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1"/></svg>
+      <span class="done">copied ✓</span>
+    </button>
+    <p class="after rv">If GoatCode saved your quota an evening, a ★ is the cheapest thank-you.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="foot">
+    <span class="mark">▄███▄</span>
+    <span>Made by <a href="https://github.com/Arhan-w" target="_blank" rel="noopener">Arhan</a> · Goated</span><span class="sep">·</span>
+    <a href="https://github.com/Arhan-w/GoatCode" target="_blank" rel="noopener">GitHub</a><span class="sep">·</span>
+    <a href="https://www.npmjs.com/package/goatcode-cli" target="_blank" rel="noopener">npm</a><span class="sep">·</span>
+    <a href="https://github.com/Arhan-w/GoatCode/releases/latest" target="_blank" rel="noopener">Releases</a><span class="sep">·</span>
+    <span>MIT</span>
+    <a class="top" href="#top">↑ top</a>
+  </div>
+</footer>
+
+<script>
+// scroll reveals — once, staggered 60ms per group, capped
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    io.unobserve(e.target);
+    const group = e.target.closest('.wrap, .stats-row, .grid, .cmd-grid, .steps, .auth-grid') || e.target.parentElement;
+    const peers = [...group.querySelectorAll('.rv')];
+    const i = Math.max(0, peers.indexOf(e.target));
+    e.target.style.transitionDelay = Math.min(i, 8) * 60 + 'ms';
+    e.target.classList.add('on');
+  }
+}, { threshold: 0.15 });
+document.querySelectorAll('.rv').forEach(el => io.observe(el));
+
+// click-to-copy install chips (hero + CTA)
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', async () => {
+    const text = chip.querySelector('.cmd').textContent.trim();
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch {}
+      ta.remove();
+    }
+    chip.classList.add('copied');
+    clearTimeout(chip._t);
+    chip._t = setTimeout(() => chip.classList.remove('copied'), 1600);
+  });
+});
+
+// demo tabs — roving tabindex + arrow keys
+const tabs = [...document.querySelectorAll('.tab')];
+function selectTab(tab) {
+  for (const t of tabs) {
+    const on = t === tab;
+    t.setAttribute('aria-selected', on);
+    t.tabIndex = on ? 0 : -1;
+    document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+  }
+}
+tabs.forEach((t, i) => {
+  t.addEventListener('click', () => selectTab(t));
+  t.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    selectTab(next); next.focus();
+  });
+});
+
+// scroll progress hairline
+const prog = document.getElementById('prog');
+addEventListener('scroll', () => {
+  const h = document.documentElement;
+  const f = h.scrollTop / (h.scrollHeight - h.clientHeight || 1);
+  prog.style.transform = 'scaleX(' + f.toFixed(4) + ')';
+}, { passive: true });
+
+// nav section highlight
+const secs = ['v3', 'failover', 'compare', 'commands', 'quickstart', 'faq'].map(id => document.getElementById(id));
+const navLinks = [...document.querySelectorAll('.nav-links a')];
+const spy = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    navLinks.forEach(a => a.setAttribute('aria-current', a.getAttribute('href') === '#' + e.target.id));
+  }
+}, { rootMargin: '-40% 0px -55% 0px' });
+secs.forEach(s => s && spy.observe(s));
+
+// count-up stats — only when visible, only once, skipped for reduced motion
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!reduce) {
+  const cio = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      cio.unobserve(e.target);
+      const el = e.target, to = +el.dataset.count, t0 = performance.now(), dur = 700;
+      (function tick(now) {
+        const p = Math.min((now - t0) / dur, 1);
+        el.textContent = Math.round(to * (1 - Math.pow(1 - p, 3)));
+        if (p < 1) requestAnimationFrame(tick);
+      })(t0);
+    }
+  }, { threshold: 0.6 });
+  document.querySelectorAll('[data-count]').forEach(el => cio.observe(el));
+}
+
+// live GitHub stars + npm version (graceful fallback to static values)
+fetch('https://api.github.com/repos/Arhan-w/GoatCode')
+  .then(r => r.ok ? r.json() : null)
+  .then(d => { if (d && typeof d.stargazers_count === 'number') document.getElementById('stars').textContent = d.stargazers_count.toLocaleString(); })
+  .catch(() => {});
+fetch('https://registry.npmjs.org/goatcode-cli/latest')
+  .then(r => r.ok ? r.json() : null)
+  .then(d => { if (d && d.version) document.getElementById('npmv').textContent = d.version; })
+  .catch(() => {});
+</script>
+</body>
+</html>

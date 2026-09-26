@@ -1,0 +1,19 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Cap,Segoe UI Black,60,&H00F3F4F2,&H008E919A,&H000A0908,&H000A0908,1,0,0,100,100,1,0,1,6,0,2,74,74,300,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.18,0:00:05.21,Cap,,0,0,0,,{\fad(120,160)}{\kf61}Every {\kf103}provider. {\kf41}One\N {\kf102}terminal. {\kf62}Never {\kf51}stop\N {\kf82}coding.
+Dialogue: 0,0:00:05.42,0:00:12.55,Cap,,0,0,0,,{\fad(120,160)}{\kf73}429 {\kf37}→ {\kf164}fallback {\kf110}chain {\kf36}→\N {\kf128}answer {\kf165}finished
+Dialogue: 0,0:00:12.76,0:00:21.20,Cap,,0,0,0,,{\fad(120,160)}{\kf97}$0 {\kf98}to {\kf194}start {\kf65}· {\kf162}zero {\kf227}config
+Dialogue: 0,0:00:21.41,0:00:28.19,Cap,,0,0,0,,{\fad(120,160)}{\kf132}/index {\kf37}· {\kf113}/find {\kf38}—\N {\kf225}tree-sitter {\kf132}ranked
+Dialogue: 0,0:00:28.40,0:00:35.51,Cap,,0,0,0,,{\fad(120,160)}{\kf184}/share {\kf53}· {\kf184}/peers {\kf53}·\N {\kf237}/handoff
+Dialogue: 0,0:00:35.72,0:00:42.02,Cap,,0,0,0,,{\fad(120,160)}{\kf226}parallel {\kf151}scout {\kf252}subagents
+Dialogue: 0,0:00:42.23,0:00:48.48,Cap,,0,0,0,,{\fad(120,160)}{\kf146}bypass {\kf104}that {\kf188}actually\N {\kf187}bypasses
