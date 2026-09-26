@@ -183,6 +183,19 @@ h1 {
 .panel[hidden] { display: none; }
 .credibility { margin-top: 12px; font: 400 12px/1.5 var(--mono); color: var(--text-2); }
 
+/* ============ video ============ */
+.demo-video { border-bottom: 1px solid var(--border); padding: 96px 0; }
+.video-frame { position: relative; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--canvas); box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+.video-frame video { width: 100%; height: auto; display: block; }
+.frame figcaption {
+  position: absolute; right: 10px; bottom: 10px;
+  font: 500 11px/1 var(--mono); color: var(--text-2);
+  background: rgba(13,6,7,.82); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 9px;
+}
+.panel[hidden] { display: none; }
+.credibility { margin-top: 12px; font: 400 12px/1.5 var(--mono); color: var(--text-2); }
+
 /* ============ code blocks ============ */
 pre.code {
   background: var(--canvas); border: 1px solid var(--border); border-radius: 10px;
@@ -453,6 +466,21 @@ button, a { transition: color 120ms var(--settle), border-color 120ms var(--sett
       <div class="card rv"><span class="label">☠ Crash recovery</span><p>Append-only session persistence with crash recovery markers. Resume interrupted sessions via <code>/recover</code> — replay pending tool calls and never lose progress.</p><span class="cmd-line">/recover</span></div>
       <div class="card rv"><span class="label">⚕ Doctor diagnostics</span><p>Run <code>/doctor</code> for a comprehensive 8-point system health check covering providers, configs, credentials, and network connectivity.</p><span class="cmd-line">/doctor</span></div>
     </div>
+  </div>
+</section>
+
+<!-- ============ demo video ============ -->
+<section class="demo-video">
+  <div class="wrap">
+    <p class="kicker rv">See it in action</p>
+    <h2 class="rv">The autonomous multi-repo coding agent</h2>
+    <p class="lede rv">A sixty-second walkthrough of GoatCode v3 — providers, code intelligence, collab relay, and failover.</p>
+    <div class="video-frame rv">
+      <video autoplay muted loop playsinline preload="metadata" poster="assets/demo-failover.png">
+        <source src="assets/goatcode-reel.mp4" type="video/mp4">
+      </video>
+    </div>
+    <p class="credibility rv" style="margin-top:16px">Full feature showcase — 60s landscape reel</p>
   </div>
 </section>
 
