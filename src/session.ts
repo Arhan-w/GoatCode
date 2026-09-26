@@ -186,7 +186,19 @@ export class Session {
     if (messagesToWrite.length === 0) return;
 
     // Append JSONL with version header
-    const header = JSON.stringify({ version: 'jsonl', id: this.id, compactedFrom: this.compactedFrom });
+    const header = JSON.stringify({
+      version: 'jsonl',
+      id: this.id,
+      title: this.title,
+      model: this.model,
+      createdAt: this.createdAt,
+      usage: this.usage,
+      turnMarks: this.turnMarks,
+      subagentForks: this.subagentForks,
+      crashRecoveryMarker: this.crashRecoveryMarker,
+      toolState: this.toolState,
+      compactedFrom: this.compactedFrom
+    });
     const body = messagesToWrite.map((m) => JSON.stringify(m)).join('\n') + '\n';
     await Bun.file(path, { create: true, open: 'a' }).write(header + '\n' + body);
 
@@ -256,6 +268,12 @@ export class Session {
           this.messages = data.messages;
           this.compactedFrom = data.compactedFrom ?? 0;
           this.digest = data.digest ?? '';
+          this.title = data.title ?? this.title;
+          this.model = data.model ?? this.model;
+          this.createdAt = data.createdAt ?? this.createdAt;
+          if (data.usage) this.usage = data.usage;
+          if (data.turnMarks) this.turnMarks = data.turnMarks;
+          if (data.subagentForks) this.subagentForks = data.subagentForks;
           return;
         }
       } catch {
@@ -269,6 +287,14 @@ export class Session {
           this.messages = lines.slice(1).map(l => JSON.parse(l));
           this.compactedFrom = header.compactedFrom ?? 0;
           this.digest = header.digest ?? '';
+          this.title = header.title ?? this.title;
+          this.model = header.model ?? this.model;
+          this.createdAt = header.createdAt ?? this.createdAt;
+          if (header.usage) this.usage = header.usage;
+          if (Array.isArray(header.turnMarks)) this.turnMarks = header.turnMarks;
+          if (Array.isArray(header.subagentForks)) this.subagentForks = header.subagentForks;
+          if (header.crashRecoveryMarker) this.crashRecoveryMarker = header.crashRecoveryMarker;
+          if (header.toolState) this.toolState = header.toolState;
           return;
         }
         // If header is not jsonl version, treat as compact JSON fallback
@@ -276,6 +302,12 @@ export class Session {
           this.messages = header.messages;
           this.compactedFrom = header.compactedFrom ?? 0;
           this.digest = header.digest ?? '';
+          this.title = header.title ?? this.title;
+          this.model = header.model ?? this.model;
+          this.createdAt = header.createdAt ?? this.createdAt;
+          if (header.usage) this.usage = header.usage;
+          if (header.turnMarks) this.turnMarks = header.turnMarks;
+          if (header.subagentForks) this.subagentForks = header.subagentForks;
           return;
         }
       } catch {
@@ -334,7 +366,7 @@ export function listSessions(): { id: string; model: string; title: string }[] {
     try {
       const first = readFileSync(join(dir, f), "utf8").split("\n", 1)[0];
       const meta = JSON.parse(first);
-      if (meta.meta) out.push({ id: meta.id, model: meta.model ?? "", title: meta.title ?? "" });
+      if (meta.id) out.push({ id: meta.id, model: meta.model ?? "", title: meta.title ?? "" });
     } catch { /* skip corrupt */ }
   }
   return out.sort((a, b) => b.id.localeCompare(a.id));
@@ -375,7 +407,7 @@ export function allSessions(): SessionSummary[] {
     try {
       const first = readFileSync(join(dir, f), "utf8").split("\n", 1)[0];
       const meta = JSON.parse(first);
-      if (meta.meta) out.push({
+      if (meta.id) out.push({
         id: meta.id, model: meta.model ?? "", title: meta.title ?? "",
         cwd: meta.cwd ?? "", createdAt: meta.createdAt ?? 0,
         usage: { cacheRead: 0, cacheWrite: 0, ...(meta.usage ?? {}) },
