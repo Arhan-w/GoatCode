@@ -64,7 +64,7 @@ const BG_DEEP = "#000F08";    // black-green — input box / dialogs
 const BG_PANEL = "#25262D";   // deep slate — secondary surfaces
 const YELL = "#facc15";
 
-const SPINNER_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽"];
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const VERBS = [
   "Accomplishing", "Actioning", "Architecting", "Baking", "Booping",
   "Calculating", "Cerebrating", "Channelling", "Choreographing", "Coalescing",
@@ -957,11 +957,11 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
             <Text color={ACCENT}>{frame} {verb}…</Text>
             <Text dimColor color={DIM}>
               {"  "}{fmtElapsed(elapsed)}{tokens ? ` · ${tokens} tok` : ""}
-              {"  "}esc to interrupt
             </Text>
           </Text>
           {thinkLine && !stream ? <Text dimColor color={DIM}>  {thinkLine}</Text> : null}
           {stream ? <MdText text={stream} /> : null}
+          <Text dimColor color={DIM}>  esc to interrupt</Text>
         </Box>
       )}
 
@@ -978,7 +978,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       )}
 
       <Box flexDirection="column">
-        <Box borderStyle="round" borderColor={thinking ? BORDER : ACCENT} paddingLeft={1} backgroundColor={BG_DEEP}>
+        <Box borderStyle="round" borderColor={thinking ? ACCENT : "#6d28d9"} paddingLeft={1} backgroundColor={BG_DEEP}>
           <Text color={ACCENT} bold>❯ </Text>
           <TextInput
             value={input}
@@ -1001,7 +1001,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
 
       {mode === "bypass" ? (
       <Box paddingLeft={1} marginBottom={1}>
-        <Text color="#facc15" bold>  🐐 ULTRACODE ACTIVE · no sandbox · no rules · no prompts · subagents fan to 8</Text>
+        <Text color="#facc15" bold>  🐐 ULTRACODE ACTIVE  ·  no sandbox  ·  no rules  ·  no prompts  ·  subagents fan to 8</Text>
       </Box>
       ) : cfg.statusLine?.command && statusLines.length ? (
         <Box flexDirection="column" paddingLeft={1}>
@@ -1010,20 +1010,25 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       ) : (
         <Box paddingLeft={1}>
           <Text dimColor color={DIM}>
-            <Text color={modeColor(mode)}>{MODE_LABEL[mode]} {(mode as string) === "bypass" ? " 🚀 ULTRACODE" : ""}</Text>
-            {"  (shift+tab to cycle)  ·  "}{cfg.model}
-            {"  ·  "}{shortPath(session.cwd)}
-            {"  ·  "}
+            <Text color={modeColor(mode)}>{MODE_LABEL[mode]}</Text>
+            {mode !== "bypass" && <Text dimColor color={DIM}>  (shift+tab to cycle)</Text>}
+            <Text dimColor color={DIM}>  ·  </Text>
+            <Text color={cfg.model.startsWith("anthropic") || cfg.model.startsWith("claude") ? GREEN : DIM}>{cfg.model}</Text>
+            <Text dimColor color={DIM}>  │  </Text>
+            <Text color={DIM}>{shortPath(session.cwd)}</Text>
+            <Text dimColor color={DIM}>  ·  </Text>
             {(() => {
               const pct = contextPct(cfg.modelId, ctxTok, cfg.contextWindow);
               if (pct == null) return null;
               const c = pct > 0.9 ? RED : pct > 0.7 ? "#facc15" : DIM;
-              return <Text color={c}>{`ctx ${Math.round(pct * 100)}%  ·  `}</Text>;
+              return <Text color={c}>{`ctx ${Math.round(pct * 100)}%`}</Text>;
             })()}
-            {mcp?.servers.size ? `${mcp.servers.size} mcp · ` : ""}
-            {skills.length ? `${skills.length} skills · ` : ""}
+            {mcp?.servers.size ? <Text dimColor color={DIM}>  ·  {mcp.servers.size} mcp</Text> : null}
+            {skills.length ? <Text dimColor color={DIM}>  ·  {skills.length} skills</Text> : null}
+          </Text>
+          <Text dimColor color={DIM}>
             <Text color={ACCENT}>/help</Text>
-            <Text dimColor color={DIM}> · ctrl+t tasks · /undo</Text>
+            <Text dimColor color={DIM}> · ctrl+t tasks · /undo · ⌘P commands</Text>
           </Text>
         </Box>
       )}
@@ -1108,6 +1113,18 @@ function Welcome({ cfg, cwd }: { cfg: GoatConfig; cwd: string }) {
     "     ▀██████▀",
     "        ▄▀▄",
   ];
+  const features = [
+    "180+ providers  ·  circuit breaker  ·  semantic search",
+    "/index  /find  /ultraplan  /share  /doctor  /fork",
+  ];
+  const tips = [
+    { key: "↑↓",  label: "history" },
+    { key: "⌘P",  label: "commands" },
+    { key: "⌘T",  label: "tasks" },
+    { key: "esc",  label: "abort" },
+    { key: "⌘O",  label: "mode" },
+    { key: "shift+tab",  label: "mode" },
+  ];
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Text>
@@ -1117,7 +1134,21 @@ function Welcome({ cfg, cwd }: { cfg: GoatConfig; cwd: string }) {
       </Text>
       <Text dimColor color={DIM}>  model {cfg.model}</Text>
       <Text dimColor color={DIM}>  path  {shortPath(cwd)}</Text>
-      <Text dimColor color={DIM}>  tips  /index · /find · /share · shift+tab cycles mode</Text>
+      <Text> </Text>
+      {features.map((f, i) => (
+        <Text key={i} dimColor color={DIM}>  ──  {f}</Text>
+      ))}
+      <Text> </Text>
+      <Box flexDirection="row">
+        <Text dimColor color={DIM}>  keys  </Text>
+        {tips.map((t, i) => (
+          <Text key={i} dimColor color={DIM}>
+            {i > 0 ? "  " : ""}
+            <Text color={ACCENT}>{t.key}</Text>
+            <Text color={DIM}> → {t.label}</Text>
+          </Text>
+        ))}
+      </Box>
     </Box>
   );
 }
