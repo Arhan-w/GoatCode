@@ -1032,36 +1032,36 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           </Text>
         </Box>
       )}
+
+      {isPaletteOpen && (
+        <CommandPalette
+          commands={paletteCommands}
+          onSelect={(cmd: Command) => {
+            if (cmd.name.startsWith("/")) {
+              const line = cmd.name.slice(1);
+              const io: any = {
+                cfg: cfgRef.current,
+                push: (n: any) => setLines((prev) => [...prev, <Box key={lineKey.current++}>{n}</Box>]),
+                exit: () => setIsPaletteOpen(false),
+                session: session,
+                skills: [],
+                setMode: (m: any) => setMode(m),
+                reloadPlugins: () => 0,
+                collab: collabRef.current,
+                runTurn: async (text: any) => {},
+                sessionRules: () => [],
+                undoTurn: () => null,
+              };
+              runSlash(line, io);
+            }
+            setIsPaletteOpen(false);
+          }}
+          onClose={() => setIsPaletteOpen(false)}
+        />
+      )}
     </Box>
   );
 }
-{isPaletteOpen ? (
-  <CommandPalette
-    commands={paletteCommands}
-    onSelect={(cmd: Command) => {
-      if (cmd.name.startsWith("/")) {
-        const line = cmd.name.slice(1);
-        const io: any = {
-          cfg: cfgRef.current,
-          push: (n: any) => setLines((prev) => [...prev, <Box key={lineKey.current++}>{n}</Box>]),
-          exit: () => setIsPaletteOpen(false),
-          session: session,
-          skills: [],
-          setMode: (m: any) => setMode(m),
-          reloadPlugins: () => 0,
-          collab: collabRef.current,
-          runTurn: async (text: any) => {},
-          sessionRules: () => [],
-          undoTurn: () => null,
-          sessionRules: () => [],
-        };
-        runSlash(line, io);
-      }
-      setIsPaletteOpen(false);
-    }}
-    onClose={() => setIsPaletteOpen(false)}
-  />
-) : null}
 
 // ---------- sub-components ----------
 
