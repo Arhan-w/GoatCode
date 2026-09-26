@@ -24,6 +24,8 @@ function assetName() {
   const arch = archMap[process.arch];
   if (!os || !arch) return null;
   const exe = os === "windows" ? ".exe" : "";
+  // Windows release asset is named just "goat.exe" not "goat-windows-x64.exe"
+  if (os === "windows") return `goat${exe}`;
   return `goat-${os}-${arch}${exe}`;
 }
 
