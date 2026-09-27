@@ -2,9 +2,10 @@
  * Skills System - Plugin API with sandboxed WASM, hot-reload, marketplace
  */
 
-import { mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { appDir } from "../config.ts";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
+import type { ChildProcess } from "node:child_process";
+import { appDir } from "./config";
 
 export interface SkillManifest {
   name: string;
@@ -123,6 +124,7 @@ export interface SkillAPI {
     set(key: string, value: any): Promise<void>;
     delete(key: string): Promise<void>;
     list(prefix?: string): Promise<string[]>;
+    clear(): Promise<void>;
   };
   // Events
   events: {
@@ -229,14 +231,11 @@ export class SkillSandbox {
         proc_raise: () => 0,
         sched_yield: () => 0,
         random_get: (buf: number, len: number) => 0,
-        fd_close: () => 0,
         fd_fdstat_get: () => 0,
         fd_fdstat_set_flags: () => 0,
         fd_filestat_get: () => 0,
         fd_filestat_set_size: () => 0,
         fd_filestat_set_times: () => 0,
-        fd_read: () => 0,
-        fd_write: this.fd_write.bind(this),
         path_create_directory: () => 0,
         path_filestat_get: () => 0,
         path_filestat_set_times: () => 0,
@@ -248,15 +247,13 @@ export class SkillSandbox {
         path_symlink: () => 0,
         path_unlink_file: () => 0,
         poll_oneoff: () => 0,
-        sched_yield: () => 0,
-        random_get: (buf: number, len: number) => 0,
       }
     };
 
-    this.module = await WebAssembly.compile(wasmBytes);
+    this.wasmModule = await WebAssembly.compile(wasmBytes);
     this.memory = new WebAssembly.Memory({ initial: 10, maximum: 100 }); // 640KB - 6.4MB
     this.imports.env.memory = new WebAssembly.Memory({ initial: 10, maximum: 100 });
-    this.instance = await WebAssembly.instantiate(this.module, this.imports);
+    this.instance = await WebAssembly.instantiate(this.wasmModule, this.imports);
   }
 
   private log(ptr: number, len: number): void {
@@ -274,10 +271,6 @@ export class SkillSandbox {
   private fd_read(fd: number, iovs_ptr: number, iovs_len: number): number { return 0; }
   private fd_close(fd: number): number { return 0; }
   private fd_seek(fd: number, offset_low: number, offset_high: number, whence: number, new_offset: number): number { return 0; }
-  private fd_write(fd: number, iovs_ptr: number, iovs_len: number, written: number): number { return 0; }
-  private fd_close(fd: number): number { return 0; }
-  private fd_read(fd: number, iovs_ptr: number, iovs_len: number, read: number): number { return 0; }
-  private fd_seek(fd: number, offset_low: number, offset_high: number, whence: number, new_offset: number): number { return 0; }
 
   async runFunction(functionName: string, args: any[]): Promise<any> {
     if (!this.instance) throw new Error("WASM not loaded");
@@ -288,7 +281,7 @@ export class SkillSandbox {
 
   async loadFromFile(wasmPath: string): Promise<void> {
     const wasmBytes = readFileSync(wasmPath);
-    await this.loadWasm(wasmPath);
+    await this.loadWasm(wasmBytes);
   }
 
   getExports(): any {
@@ -302,6 +295,7 @@ export class SkillManager {
   private skillDirs: string[];
   private marketplaceIndex: Map<string, SkillManifest> = new Map();
   private registryUrl?: string;
+  private sandboxes = new Map<string, SkillSandbox>();
 
   constructor(skillDirs: string[] = []) {
     this.skillDirs = skillDirs;
@@ -370,7 +364,7 @@ export class SkillManager {
     // Load skill (WASM or JS)
     const skill: LoadedSkill = {
       manifest,
-      path: skillDir,
+      skillDir: skillPath,
       loaded: false,
       instance: null,
       exports: {},
@@ -379,7 +373,7 @@ export class SkillManager {
 
     // Check if it's a WASM skill or JS module
     const wasmPath = join(skillPath, manifest.main.replace(/\.js$/, ".wasm"));
-    const jsPath = join(skillDir, manifest.main);
+    const jsPath = join(skillPath, manifest.main);
 
     let instance: any = null;
 
@@ -398,7 +392,7 @@ export class SkillManager {
     }
 
     // Initialize skill context
-    const context = await this.createSkillContext(manifest, skillDir);
+    const context = this.getSkillContext(manifest, skillPath);
     skill.context = context;
 
     // Initialize skill
@@ -419,7 +413,7 @@ export class SkillManager {
     if (!manifest.name || !manifest.version || !manifest.main) {
       throw new Error("Invalid skill manifest: missing required fields");
     }
-    if (!semver.satisfies(manifest.apiVersion, ">=1.0.0")) {
+    if (manifest.apiVersion < "1.0.0") {
       throw new Error(`Unsupported API version: ${manifest.apiVersion}`);
     }
   }
@@ -482,6 +476,25 @@ export class SkillManager {
     return {
       skillDir,
       config: {},
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+      },
+      storage: {
+        get: async <T>(key: string): Promise<T | null> => null,
+        set: async (key: string, value: any) => {},
+        delete: async (key: string) => {},
+        list: async (prefix?: string) => [],
+        clear: async () => {},
+      },
+      events: {
+        on: (event: string, handler: (data: any) => void) => { return () => {}; },
+        emit: (event: string, data: any) => {},
+        once: (event: string, handler: (data: any) => void) => {},
+        off: (event: string, handler: (data: any) => void) => {},
+      },
       api: {
         fs: {
           readFile: async (path: string) => {
@@ -589,28 +602,6 @@ export class SkillManager {
       }
       return resolved;
     }
-
-  private async createSkillContext(manifest: SkillManifest, skillDir: string): Promise<SkillContext> {
-    // Implementation
-    return {} as SkillContext;
-  }
-
-  private async loadSkillsFromDir(dir: string): Promise<void> {
-    try {
-      const entries = readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const skillPath = join(dir, entry.name);
-          const manifestPath = join(skillPath, "skill.json");
-          if (existsSync(manifestPath)) {
-            await this.loadSkill(entry.name, skillPath);
-          }
-        }
-      }
-    } catch (e) {
-      // Directory might not exist
-    }
-  }
 
   private registerExports(skillName: string, exports: SkillExports): void {
     if (exports.commands) {
