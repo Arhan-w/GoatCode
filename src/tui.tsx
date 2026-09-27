@@ -10,7 +10,7 @@
  */
 import { Box, Static, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
-import { CommandPalette, type Command } from "./palette.tsx";
+import { CommandPalette, type Command, buildCommandList } from "./palette.tsx";
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join, relative, resolve as resolvePath } from "node:path";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -298,9 +298,11 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       // Build palette commands from all available sources
       const slashCommands = (await import("./commands.tsx")).SLASH_COMMANDS;
       const commandDescs = (await import("./commands.tsx")).COMMAND_DESC;
-      const skills = (await import("./skills/loader.ts")).allSkills;
-      const pluginNames = Object.keys((await import("./plugins/marketplace.ts")).loadPlugins);
-      const sessions = (await import("./session.ts")).listSessions();
+      const { allSkills } = await import("./index-shared.ts");
+      const skills = allSkills(cfgRef.current);
+      const pluginLoader = await import("./plugins/loader.ts");
+      const pluginNames = Object.keys(pluginLoader.loadPlugins(cfgRef.current.pluginDirs.map((d) => resolvePath(process.cwd(), d))));
+      const sessions = (await import("./session.ts")).listSessions().map(s => s.id);
       const pluginDescriptions = pluginNames.map((n) => ({
         name: `/plugin:${n}`,
         description: `Plugin: ${n}`,
@@ -1012,7 +1014,7 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         <Box paddingLeft={1}>
           <Text dimColor color={DIM}>
             <Text color={modeColor(mode)}>{MODE_LABEL[mode]}</Text>
-            {mode !== "bypass" && <Text dimColor color={DIM}>  (shift+tab to cycle)</Text>}
+            <Text dimColor color={DIM}>  (shift+tab to cycle)</Text>
             <Text dimColor color={DIM}>  ·  </Text>
             <Text color={cfg.model.startsWith("anthropic") || cfg.model.startsWith("claude") ? GREEN : DIM}>{cfg.model}</Text>
             <Text dimColor color={DIM}>  │  </Text>
