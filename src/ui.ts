@@ -160,7 +160,6 @@ export function highlightCode(code: string, language: string = "typescript", opt
     return highlight(code, {
       language,
       theme: options.theme || "dark",
-      lineNumbers: options.lineNumbers ?? false,
       ignoreIllegals: true
     });
   } catch {
@@ -170,8 +169,8 @@ export function highlightCode(code: string, language: string = "typescript", opt
 
 // Highlight code blocks in text
 export function highlightCodeBlocks(text: string, options: HighlightOptions = {}): string {
-  return text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
-    const lang = lang || "text";
+  return text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, matchedLang, code) => {
+    const lang = matchedLang || "text";
     const highlighted = highlightCode(code.trim(), lang, options);
     return `\n\`\`\`${lang}\n${highlighted}\n\`\`\`\n`;
   });
@@ -183,10 +182,10 @@ export function renderDiff(oldText: string, newText: string, options: DiffOption
   const ignoreWhitespace = options.ignoreWhitespace ?? false;
   const color = options.color ?? true;
 
-  const diff = diff.diffLines(oldText, newText, { ignoreWhitespace });
+  const diffResult = diff.diffLines(oldText, newText, { ignoreWhitespace });
   
   let output = "";
-  for (const part of diff) {
+  for (const part of diffResult) {
     const colorize = (text: string, color: string) => color ? (ansi as any)[color](text) : text;
     
     if (part.added) {
@@ -227,10 +226,15 @@ export function sideBySideDiff(oldText: string, newText: string, options: DiffOp
   output += "OLD".padEnd(62) + " | " + "NEW".padEnd(62) + "\n";
   output += "─".repeat(123) + "\n";
   
-  let oldLines: string[] = [];
-  let newLines: string[] = [];
+  interface LineEntry {
+    type: string;
+    text: string;
+  }
+  let oldLines: LineEntry[] = [];
+  let newLines: LineEntry[] = [];
   
-  for (const part of require("diff").diffLines(oldText, newText)) {
+  const diffResult2 = require("diff").diffLines(oldText, newText);
+  for (const part of diffResult2) {
     if (part.added) {
       for (const line of part.value.split("\n").filter(Boolean)) {
         newLines.push({ type: "added", text: line });
@@ -252,8 +256,8 @@ export function sideBySideDiff(oldText: string, newText: string, options: DiffOp
     const oldLine = oldLines[i] || { type: "empty", text: "" };
     const newLine = newLines[i] || { type: "empty", text: "" };
     
-    const oldText = oldLine.text.padEnd(leftWidth).slice(0, leftWidth);
-    const newText = newLine.text.padEnd(rightWidth).slice(0, rightWidth);
+    const displayOld = oldLine.text.padEnd(leftWidth).slice(0, leftWidth);
+    const displayNew = newLine.text.padEnd(rightWidth).slice(0, rightWidth);
     
     let oldColor = (s: string) => s;
     let newColor = (s: string) => s;
@@ -266,7 +270,7 @@ export function sideBySideDiff(oldText: string, newText: string, options: DiffOp
     else if (newLine.type === "removed") newColor = ansi.red;
     else if (newLine.type === "context") newColor = ansi.dim;
     
-    output += oldColor(oldText) + " | " + newColor(newText) + "\n";
+    output += oldColor(displayOld) + " | " + newColor(displayNew) + "\n";
   }
   
   return output;
@@ -420,9 +424,7 @@ export const indicators = {
   file: ansi.white("📄"),
   search: ansi.blue("🔍"),
   lightning: ansi.yellow("⚡"),
-  fire: ansi.red("🔥"),
-  check: ansi.green("✓"),
-  cross: ansi.red("✗")
+  fire: ansi.red("🔥")
 };
 
 // Box drawing characters
@@ -437,7 +439,7 @@ export const box = {
   bottomT: "┴",
   leftT: "├",
   rightT: "┤",
-  cross: "┼"
+  crossBar: "┼"
 };
 
 // Draw a box

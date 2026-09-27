@@ -116,9 +116,11 @@ export function ScrollableList<T>({
         )}
       </Static>
       {items.length > maxVisible && (
-        <Text color="#a855f7" onClick={() => setShowAll(!showAll)}>
-          {showAll ? "Show less ▲" : `Show ${items.length - maxVisible} more ▼`}
-        </Text>
+        <Box onClick={() => setShowAll(!showAll)} cursor="pointer">
+          <Text color="#a855f7">
+            {showAll ? "Show less ▲" : `Show ${items.length - maxVisible} more ▼`}
+          </Text>
+        </Box>
       )}
     </Box>
   );

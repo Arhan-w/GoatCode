@@ -387,7 +387,7 @@ export class ToolKit {
       }
       return result;
     } catch (e: any) {
-      const err = e instanceof GoatError ? e : new GoatError('ERR_GENERIC', `${e?.name ?? "Error"}: ${e?.message ?? e}`);
+      const err = e instanceof GoatError ? e : Object.assign(new Error(), e, { code: 'ERR_GENERIC' });
       return { ok: false, output: formatError(err) };
     }
   }

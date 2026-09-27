@@ -273,7 +273,7 @@ class SessionDatabase {
       ORDER BY rank LIMIT ?
     `).all(query, options.cwd ? `%${options.cwd}%` : "%", options.limit || 20);
     
-    return rows.map(row => ({
+    return rows.map((row: any) => ({
       ...row,
       messages: JSON.parse(row.messages_json),
       tags: JSON.parse(row.tags || "[]"),
@@ -345,7 +345,7 @@ class SessionDatabase {
   }
 
   getTags(sessionId: string): string[] {
-    return this.db.prepare("SELECT tag FROM session_tags WHERE session_id = ?").all(sessionId).map(r => r.tag);
+    return this.db.prepare("SELECT tag FROM session_tags WHERE session_id = ?").all(sessionId).map((r: any) => r.tag);
   }
 
   // Session history with pagination
@@ -370,7 +370,7 @@ class SessionDatabase {
     query += " ORDER BY updated_at DESC LIMIT ? OFFSET ?";
     params.push(options.limit || 50, options.offset || 0);
 
-    return this.db.prepare(query).all(...params).map(row => ({
+    return this.db.prepare(query).all(...params).map((row: any) => ({
       ...row,
       messages: JSON.parse(row.messages_json),
       tags: JSON.parse(row.tags || "[]"),
@@ -418,5 +418,4 @@ class SessionDatabase {
 export const sessionDB = new SessionDatabase();
 export { SessionDatabase };
 
-// Export types
-export type { SessionRecord, SessionSnapshot, SessionSearchResult };
+// Types are exported above with the interface declarations.

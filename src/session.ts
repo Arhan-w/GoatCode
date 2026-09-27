@@ -205,18 +205,18 @@ export class Session {
     this._saveCount++;
 
     // Compact if needed
-    if (this.shouldCompact()) {
+    if (await this.shouldCompact()) {
       await this.compact();
     }
   }
 
-  private shouldCompact(): boolean {
+  private async shouldCompact(): Promise<boolean> {
     const remaining = this.messages.length - this.compactedFrom;
     if (remaining >= Session.COMPACT_THRESHOLD) return true;
 
     // Check file size
     try {
-      const stats = Bun.file(this.path()).statSync();
+      const stats = await Bun.file(this.path()).stat();
       return stats.size > Session.COMPACT_SIZE_THRESHOLD;
     } catch {
       return false;

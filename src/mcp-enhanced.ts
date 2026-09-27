@@ -55,6 +55,7 @@ export interface McpResourceTemplate {
   name: string;
   description?: string;
   mimeType?: string;
+  handler?: (uri: string, variables: Record<string, string>) => Promise<any>;
 }
 
 export interface McpPrompt {
@@ -233,7 +234,13 @@ export class McpServer extends EventEmitter {
         resolve();
       });
     });
-    this.transports.push({ type: "http", server });
+    const httpTransport: McpTransport = {
+      id: 'http',
+      type: 'http',
+      send: (msg: any) => { /* HTTP transport send */ },
+      close: () => { server.close(); }
+    };
+    this.transports.push(httpTransport);
   }
 
   private async startWebSocket(): Promise<void> {
@@ -244,7 +251,7 @@ export class McpServer extends EventEmitter {
     const server = createHttpServer();
     const wss = new WebSocketServer({ server, path });
 
-    wss.on("connection", (ws: WebSocket, req) => {
+    wss.on("connection", (ws: WebSocket, req: any) => {
       if (!this.authenticateWs(req)) {
         ws.close(4001, "Unauthorized");
         return;
@@ -262,10 +269,10 @@ export class McpServer extends EventEmitter {
       this.transports.push(transport);
       this.authenticatedClients.set(clientId, { connectedAt: Date.now() });
 
-      ws.on("message", (data) => {
+      ws.addEventListener("message", (event: MessageEvent) => {
         try {
-          const request = JSON.parse(data.toString());
-          this.handleRequest(request).then(response => {
+          const data = JSON.parse(event.data.toString());
+          this.handleRequest(data).then(response => {
             if (response) ws.send(JSON.stringify(response));
           }).catch(err => {
             ws.send(JSON.stringify({ jsonrpc: "2.0", error: { code: -32603, message: err.message }, id: null }));
@@ -275,7 +282,7 @@ export class McpServer extends EventEmitter {
         }
       });
 
-      ws.on("close", () => {
+      ws.addEventListener("close", () => {
         this.transports = this.transports.filter(t => t.id !== clientId);
         this.authenticatedClients.delete(clientId);
       });
@@ -287,7 +294,6 @@ export class McpServer extends EventEmitter {
         resolve();
       });
     });
-    this.transports.push({ type: "ws", server: wss });
   }
 
   private async startSSE(): Promise<void> {

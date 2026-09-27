@@ -59,7 +59,7 @@ export function CommandPalette({
     setSelected(0);
   }, [filtered.length]);
 
-  useInput((key) => {
+  useInput((_, key: any) => {
     if (key.upArrow) {
       setSelected((s) => Math.max(0, s - 1));
     } else if (key.downArrow) {

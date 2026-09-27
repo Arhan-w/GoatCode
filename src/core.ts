@@ -145,4 +145,3 @@ export class GoatCodeCore {
 }
 
 export const goatCode = new GoatCodeCore();
-export { GoatCodeCore };
