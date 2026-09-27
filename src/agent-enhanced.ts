@@ -126,23 +126,6 @@ export class EnhancedAgent {
     this.lastPromptTokens = 0;
   }
 
-  private messages(): Message[] {
-    const ctx = this.session.context();
-    let sys = buildSystemPrompt(this.session.cwd);
-    if (this.extraSystem) sys += "\n\n" + this.extraSystem;
-    if (this.reasoningTrace.length > 0) {
-      sys += "\n\n## Reasoning Trace\n" + this.reasoningTrace.slice(-5).map(r => `[${r.type.toUpperCase()}] ${r.content}`).join("\n");
-    }
-    if (this.extraSystem) sys += "\n\n" + this.extraSystem;
-    const msgs: Message[] = [{ role: "system", content: sys }];
-    if (this.session.compactedFrom > 0) {
-      const digest = this.session.digest || summarize(this.session.messages.slice(0, this.session.compactedFrom));
-      msgs.push({ role: "system", content: digest });
-    }
-    msgs.push(...ctx);
-    return msgs;
-  }
-
   async createPlan(goal: string): Promise<Plan> {
     const planningPrompt = `You are a planning agent. Create a detailed step-by-step plan to achieve the goal.
     
@@ -189,7 +172,6 @@ Format as JSON:
           expectedOutcome: s.expectedOutcome || "",
           status: "pending"
         })),
-        goal: planData.goal || "Complete task",
         currentStep: 0,
         status: "planning"
       };
@@ -247,7 +229,7 @@ Format as JSON:
 
     if (this.enablePlanning && !this.plan) {
       const userTextStr = typeof userText === "string" ? userText : textOf(userText);
-      this.plan = await this.createPlan(userText);
+      this.plan = await this.createPlan(typeof userText === "string" ? userText : textOf(userText));
       yield { kind: "planning", plan: this.plan };
     }
 
@@ -366,6 +348,10 @@ Format as JSON:
   private async spawnSubagent(args: Record<string, unknown>): Promise<{ ok: boolean; output: string }> {
     return { ok: true, output: "Subagent completed" };
   }
-}
 
-export type { Plan, PlanStep, ReasoningStep, Plan };
+  private maybeCompact(): void {
+    if (this.session.usage.out > COMPACT_TRIGGER_CHARS) {
+      // Will compact on next turn
+    }
+  }
+}
