@@ -12,10 +12,10 @@
  * and skills flow through the same invocation path (/name, body on demand,
  * listed by /skills) as native ones.
  */
-import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadSkills, type SkillDef } from "../skills/loader.ts";
-import { createSandbox, type SandboxConfig, type SandboxResult } from "./sandbox.ts";
+import { createSandbox, type SandboxConfig, type SandboxResult, executeSandbox } from "./sandbox.ts";
 
 export interface PluginManifest {
   name?: string;
@@ -110,7 +110,7 @@ export async function executeSandboxedPlugin(
     timeoutMs: 30_000,
     onStdout: (data) => process.stdout.write(data),
     onStderr: (data) => process.stderr.write(data),
-  }).then(() => ({ ok: true, output: "", exitCode: 0, signal: null, durationMs: 0, timedOut: false }));
+  });
 
   // Clean up args file
   try { unlinkSync(argsFile); } catch { /* ignore */ }

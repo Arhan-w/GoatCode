@@ -144,6 +144,7 @@ export interface Provider {
   envKey?: string;
   models: string[];
   custom: boolean;
+  label?: string;
 }
 
 export interface Credential {
@@ -286,15 +287,19 @@ export class ProviderRegistry {
     await this.ensureLoaded();
     const ep = this._endpoints.get(id);
     if (ep) {
-      return { id, baseUrl: ep.baseUrl, format: ep.format, label: ep.label, models: ep.models };
+      return {
+        id, name: ep.label || id, baseUrl: ep.baseUrl, format: ep.format,
+        auth: "apikey", envKey: ep.apiKeyEnv, models: ep.models, custom: true, label: ep.label,
+      };
     }
     return this._catalog?.get(id);
   }
 
   async listProviders(): Promise<Provider[]> {
     await this.ensureLoaded();
-    const eps = [...this._endpoints.entries()].map(([id, ep]) => ({
-      id, baseUrl: ep.baseUrl, format: ep.format, label: ep.label, models: ep.models
+    const eps: Provider[] = [...this._endpoints.entries()].map(([id, ep]) => ({
+      id, name: ep.label || id, baseUrl: ep.baseUrl, format: ep.format,
+      auth: "apikey", envKey: ep.apiKeyEnv, models: ep.models, custom: true, label: ep.label,
     }));
     const builtins = this._catalog ? [...this._catalog.values()] : [];
     return [...eps, ...builtins];

@@ -5,7 +5,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { appDir } from "../config.ts";
+import { appDir } from "./config.ts";
 import Database from "better-sqlite3";
 
 const DB_PATH = join(appDir(), "sessions.db");
@@ -232,7 +232,7 @@ class SessionDatabase {
 
   // Session search with FTS
   search(query: string, options: { limit?: number; cwd?: string; model?: string; tags?: string[] } = {}): any[] {
-    let query = `
+    let sql = `
       SELECT s.*, 
         snippet(sessions_fts, -1, '...', '...', '...', 32) as snippet
       FROM sessions_fts
@@ -243,22 +243,22 @@ class SessionDatabase {
     const params: any[] = [query];
     
     if (options.cwd) {
-      query += " AND s.cwd = ?";
+      sql += " AND s.cwd = ?";
       params.push(options.cwd);
     }
     if (options.model) {
-      query += " AND s.model = ?";
+    sql += " AND s.model = ?";
       params.push(options.model);
     }
     if (options.tags?.length) {
-      query += " AND EXISTS (SELECT 1 FROM session_tags st WHERE st.session_id = s.id AND st.tag IN (" + options.tags.map(() => "?").join(",") + "))";
+      sql += " AND EXISTS (SELECT 1 FROM session_tags st WHERE st.session_id = s.id AND st.tag IN (" + options.tags.map(() => "?").join(",") + "))";
       params.push(...options.tags);
     }
     
-    query += " ORDER BY bm25(sessions_fts) LIMIT ?";
+    sql += " ORDER BY bm25(sessions_fts) LIMIT ?";
     params.push(options.limit || 20);
 
-    return this.db.prepare(query).all(...params);
+    return this.db.prepare(sql).all(...params);
   }
 
   // Full-text search with ranking
@@ -333,10 +333,6 @@ class SessionDatabase {
 
     this.save({ ...session, ...snap, id: `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` });
     return this.get(newSession.id);
-  }
-
-  listSnapshots(sessionId: string): any[] {
-    return this.listSnapshots(sessionId);
   }
 
   // Tagging

@@ -1,0 +1,11 @@
+declare module "yjs";
+declare module "y-websocket";
+declare module "y-indexeddb";
+declare module "onnxruntime-node";
+declare module "@xenova/transformers";
+declare module "effect";
+declare module "ansi-colors";
+declare module "diff";
+declare module "node:fetch";
+declare module "ws";
+declare module "better-sqlite3";

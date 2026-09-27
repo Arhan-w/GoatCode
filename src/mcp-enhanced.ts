@@ -166,7 +166,7 @@ export class McpServer extends EventEmitter {
     });
 
     process.stdout.on("error", (err) => {
-      if (err.code !== "EPIPE") console.error("STDOUT error:", err);
+      if ((err as any).code !== "EPIPE") console.error("STDOUT error:", err);
     });
   }
 
@@ -473,12 +473,6 @@ export class McpServer extends EventEmitter {
     }
   }
 
-  // Resource subscriptions for real-time updates
-  private resourceSubscriptions = new Map<string, Set<string>>();
-
-  // Transport management
-  private transports: McpTransport[] = [];
-  
   addTransport(transport: McpTransport): void {
     this.transports.push(transport);
   }
@@ -499,13 +493,6 @@ export interface McpTransport {
 }
 
 export interface McpContext {
-  clientId: string;
-  requestId: string;
-  sessionId?: string;
-  auth?: any;
-}
-
-interface McpContext {
   clientId: string;
   requestId: string;
   sessionId?: string;
@@ -606,5 +593,3 @@ export class McpClient {
     this.transport.close();
   }
 }
-
-export { McpServer, McpClient, McpTransport, McpTool, McpResource, McpPrompt, McpContext };

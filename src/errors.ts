@@ -59,7 +59,6 @@ export class ProviderError extends GoatError {
 export class RateLimitError extends ProviderError {
   constructor(providerId: string, retryAfter?: number) {
     super(providerId, 'Rate limit exceeded', retryAfter);
-    this.code = 'ERR_PROVIDER_RATE_LIMIT';
   }
 }
 
@@ -117,10 +116,16 @@ export class ValidationError extends GoatError {
 /** Wrap errors with actionable context */
 export function withSuggestion(error: Error, suggestion: string): GoatError {
   if (error instanceof GoatError) {
-    error.suggestion = suggestion;
+    (error as any).suggestion = suggestion;
     return error;
   }
-  return new GoatError('ERR_GENERIC', error.message, { suggestion });
+  return new GenericError(error.message, { suggestion });
+}
+
+export class GenericError extends GoatError {
+  constructor(message: string, opts?: { suggestion?: string }) {
+    super('ERR_GENERIC', message, opts);
+  }
 }
 
 /** Format error for display */

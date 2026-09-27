@@ -72,7 +72,7 @@ export async function resolve(cfg: GoatConfig, registry: ProviderRegistry): Prom
     return { provider: flash, credential: { kind: "api_key", apiKey: "free", expiresAt: 0 }, client: new GoatedFlashFreeClient() };
   }
   // Ensure catalog is loaded before resolving
-  await registry.ensureLoaded();
+  await (registry as any).ensureLoaded();
   const provider = registry.get(cfg.provider);
   if (!provider) throw new UnknownProvider(cfg.provider);
   let cred = registry.resolveCredential(provider.id);

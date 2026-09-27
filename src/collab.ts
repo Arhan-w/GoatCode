@@ -12,7 +12,7 @@ export interface CollabConfig {
   roomName: string;
   userId: string;
   userName: string;
-  userColor: string;
+  userColor?: string;
   signalingServer?: string; // WebRTC signaling server
   websocketUrl?: string; // y-websocket server
   persistence?: boolean; // Enable IndexedDB persistence
@@ -22,7 +22,7 @@ export interface CollabUser {
   id: string;
   name: string;
   color: string;
-  cursor?: { x: number; y: number; selection?: { start: number; end: number } };
+  cursor?: { x?: number; y?: number; position?: number; selection?: { start: number; end: number } };
   lastActive: number;
   isOnline: boolean;
 }
@@ -43,13 +43,10 @@ export interface CollabEvent {
   timestamp: number;
 }
 
-interface CollabUserInternal extends CollabUser {
-  awareness: any; // Yjs awareness
-  lastPing: number;
-}
-
 export class CollabManager extends EventEmitter {
-  private doc: Y.Doc;
+  private doc: any;
+  private ydoc: any;
+  private ytext: any;
   private provider: any; // WebsocketProvider
   private persistence: any; // IndexeddbPersistence
   private awareness: any; // Yjs awareness
@@ -70,15 +67,16 @@ export class CollabManager extends EventEmitter {
     super();
     this.roomName = config.roomName;
     this.userId = config.userId;
+    this.localUserId = config.userId;
     this.userName = config.userName;
     this.userColor = config.userColor || this.generateColor();
-    
-    this.doc = new Y.Doc();
+
+    this.doc = new (Y as any).Doc();
     this.setupYjs();
-    
+
     // Initialize connection
     this.connect(config.websocketUrl || "wss://demos.yjs.dev", config.roomName);
-    
+
     if (config.persistence) {
       this.setupPersistence();
     }
@@ -87,15 +85,16 @@ export class CollabManager extends EventEmitter {
   private setupYjs(): void {
     // Create shared text type for collaborative editing
     this.ydoc = this.doc.getText("content");
-    
+    this.ytext = this.doc.getText("content");
+
     // Awareness for cursor positions and user presence
-    this.awareness = (this.doc as any).awareness || (this.doc as any).awareness || this.createAwareness();
-    
+    this.awareness = (this.doc as any).awareness || this.createAwareness();
+
     // Set local user info
     this.awareness.setLocalStateField("user", {
       id: this.userId,
       name: this.userName,
-      color: this.generateColor(),
+      color: this.userColor,
       cursor: null,
       lastActive: Date.now()
     });
@@ -111,19 +110,23 @@ export class CollabManager extends EventEmitter {
     });
 
     // Observe text changes
-    this.ytext = this.doc.getText("content");
     this.ytext.observe((event: any) => {
       this.emit("content-change", {
         delta: event.changes,
-        content: this.doc.getText("content").toString()
+        content: this.ytext.toString()
       });
     });
   }
 
+  private broadcastAwareness(): void {
+    const states = this.awareness.getStates();
+    this.emit("awareness-change", states);
+  }
+
   private createAwareness(): any {
-    // Minimal awareness implementation if Yjs awareness not available
     return {
       states: new Map(),
+      getLocalState: () => ({ user: { id: this.userId, name: this.userName, color: this.userColor } }),
       setLocalStateField: (key: string, value: any) => {},
       on: (event: string, handler: Function) => {},
       off: (event: string, handler: Function) => {},
@@ -133,11 +136,10 @@ export class CollabManager extends EventEmitter {
 
   private async connect(wsUrl: string, roomName: string): Promise<void> {
     try {
-      // Dynamic import for y-websocket
       const { WebsocketProvider } = await import("y-websocket");
-      
+
       this.provider = new WebsocketProvider(
-        "wss://demos.yjs.dev", // Default signaling server
+        wsUrl || "wss://demos.yjs.dev",
         this.roomName,
         this.doc,
         { connect: true }
@@ -209,7 +211,7 @@ export class CollabManager extends EventEmitter {
 
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
     this.reconnectAttempts++;
-    
+
     setTimeout(() => {
       this.reconnect();
     }, delay);
@@ -232,12 +234,11 @@ export class CollabManager extends EventEmitter {
 
   // Get current document content
   getContent(): string {
-    return this.doc.getText("content").toString();
+    return this.ytext ? this.ytext.toString() : "";
   }
 
   // Set content (local change)
   setContent(content: string): void {
-    const ytext = this.doc.getText("content");
     this.doc.transact(() => {
       this.ytext.delete(0, this.ytext.length);
       this.ytext.insert(0, content);
@@ -256,17 +257,18 @@ export class CollabManager extends EventEmitter {
 
   // Get current users
   getUsers(): Map<string, CollabUser> {
-    const users = new Map<string, any>();
+    const users = new Map<string, CollabUser>();
     const states = this.awareness.getStates();
-    
+
     for (const [clientId, state] of states.entries()) {
-      if (state.user) {
-        users.set(state.user.id || clientId, {
-          id: state.user.id || clientId,
-          name: state.user.name || "Unknown",
-          color: state.user.color || this.generateColor(),
-          cursor: state.user.cursor,
-          lastActive: state.user.lastActive || Date.now(),
+      if ((state as any).user) {
+        const u = (state as any).user;
+        users.set(u.id || String(clientId), {
+          id: u.id || String(clientId),
+          name: u.name || "Unknown",
+          color: u.color || this.generateColor(),
+          cursor: u.cursor,
+          lastActive: u.lastActive || Date.now(),
           isOnline: true
         });
       }
@@ -284,7 +286,7 @@ export class CollabManager extends EventEmitter {
   }
 
   // Update user presence
-  setUserStatus(status: "active" | "away" | "busy"): void {
+  setUserStatus(status: "active" | "away" | "busy" | "offline"): void {
     this.awareness.setLocalStateField("user", {
       ...this.awareness.getLocalState()?.user,
       status,
@@ -292,34 +294,6 @@ export class CollabManager extends EventEmitter {
     });
   }
 
-  // Get document content as string
-  getContent(): string {
-    return this.doc.getText("content").toString();
-  }
-
-  // Get document as Uint8Array for sync
-  getStateVector(): Uint8Array {
-    return Y.encodeStateAsUpdate(this.doc);
-  }
-
-  // Apply remote update
-  applyUpdate(update: Uint8Array): void {
-    Y.applyUpdate(this.doc, update);
-  }
-
-  // Get state vector for sync
-  getStateVector(): Uint8Array {
-    return Y.encodeStateVector(this.doc);
-  }
-
-  // Conflict resolution for concurrent edits
-  resolveConflicts(localChanges: any[], remoteChanges: any[]): any[] {
-    // Yjs handles conflicts automatically via CRDT
-    // This is for application-level conflict resolution if needed
-    return localChanges;
-  }
-
-  // User presence
   updatePresence(data: Partial<CollabUser>): void {
     this.awareness.setLocalStateField("user", {
       ...this.awareness.getLocalState()?.user,
@@ -328,56 +302,30 @@ export class CollabManager extends EventEmitter {
     });
   }
 
-  // Set user cursor position
   setCursor(position: number, selection?: { start: number; end: number }): void {
-    this.awareness.setLocalStateField("user", {
-      ...this.awareness.getLocalState()?.user,
-      cursor: { position: data.position, selection: data.selection },
-      lastActive: Date.now()
-    });
+    this.updateCursor(position, selection);
   }
 
-  // Get all connected users
-  getUsers(): Map<string, CollabUser> {
-    const users = new Map<string, any>();
-    const states = this.awareness.getStates();
-    
-    for (const [clientId, state] of states.entries()) {
-      if (state.user) {
-        users.set(state.user.id, {
-          id: state.user.id,
-          name: state.user.name,
-          color: state.user.color,
-          cursor: state.user.cursor,
-          lastActive: state.user.lastActive,
-          isOnline: true
-        });
-      }
-    }
-    return users;
+  getUserList(): CollabUser[] {
+    return Array.from(this.getUsers().values());
   }
 
-  // Get document content
-  getContent(): string {
-    return this.doc.getText("content").toString();
-  }
-
-  // Set content (replace all)
-  setContent(content: string): void {
-    this.doc.transact(() => {
-      this.ytext.delete(0, this.ytext.length);
-      this.ytext.insert(0, content);
-    });
-  }
-
-  // Insert text at position
-  insertText(index: number, text: string): void {
-    this.ytext.insert(index, text);
-  }
-
-  // Delete text
-  deleteText(index: number, length: number): void {
-    this.ytext.delete(index, length);
+  getCurrentUser(): CollabUser {
+    const state = this.awareness.getLocalState();
+    return state?.user ? {
+      id: state.user.id,
+      name: state.user.name,
+      color: state.user.color,
+      cursor: state.user.cursor,
+      lastActive: state.user.lastActive,
+      isOnline: true
+    } : {
+      id: this.userId,
+      name: this.userName,
+      color: this.userColor,
+      lastActive: Date.now(),
+      isOnline: true
+    } as any;
   }
 
   // Subscribe to content changes
@@ -401,86 +349,28 @@ export class CollabManager extends EventEmitter {
     return () => this.awareness.off("change", handler);
   }
 
-  // User presence
-  setUserStatus(status: "active" | "away" | "busy" | "offline"): void {
-    this.awareness.setLocalStateField("user", {
-      ...this.awareness.getLocalState()?.user,
-      status,
-      lastActive: Date.now()
-    });
-  }
-
-  // Set cursor position with optional selection
-  setCursor(position: number, selection?: { start: number; end: number }): void {
-    this.awareness.setLocalStateField("user", {
-      ...this.awareness.getLocalState()?.user,
-      cursor: { position, selection },
-      lastActive: Date.now()
-    });
-  }
-
-  // Get all connected users
-  getUsers(): CollabUser[] {
-    const users: CollabUser[] = [];
-    const states = this.awareness.getStates();
-    
-    for (const [clientId, state] of states.entries()) {
-      if (state.user) {
-        users.push({
-          id: state.user.id,
-          name: state.user.name,
-          color: state.user.color,
-          cursor: state.user.cursor,
-          lastActive: state.user.lastActive,
-          isOnline: Date.now() - state.user.lastActive < 30000
-        });
-      }
-    }
-    return users;
-  }
-
-  // Get current user info
-  getCurrentUser(): CollabUser {
-    const state = this.awareness.getLocalState();
-    return state.user ? {
-      id: state.user.id,
-      name: state.user.name,
-      color: state.user.color,
-      cursor: state.user.cursor,
-      lastActive: state.user.lastActive,
-      isOnline: true
-    } : {
-      id: this.userId,
-      name: this.userName,
-      color: this.generateColor(),
-      lastActive: Date.now(),
-      isOnline: true
-    };
-  }
-
   // Export document state for saving
   exportState(): Uint8Array {
-    return Y.encodeStateAsUpdate(this.doc);
+    return (Y as any).encodeStateAsUpdate(this.doc);
   }
 
   // Import document state
   loadState(update: Uint8Array): void {
-    Y.applyUpdate(this.doc, update);
+    (Y as any).applyUpdate(this.doc, update);
   }
 
   // Get state vector for sync
   getStateVector(): Uint8Array {
-    return Y.encodeStateVector(this.doc);
+    return (Y as any).encodeStateVector(this.doc);
   }
 
   // Apply remote update
   applyUpdate(update: Uint8Array): void {
-    Y.applyUpdate(this.doc, update);
+    (Y as any).applyUpdate(this.doc, update);
   }
 
-  // Get state vector for sync
-  getStateVector(): Uint8Array {
-    return Y.encodeStateVector(this.doc);
+  resolveConflicts(localChanges: any[], remoteChanges: any[]): any[] {
+    return localChanges;
   }
 
   // Disconnect
@@ -539,7 +429,7 @@ export class CollabSessionManager {
       userName: this.userName,
       ...config
     });
-    
+
     this.sessions.set(roomName, session);
     return session;
   }
@@ -568,8 +458,6 @@ export class CollabSessionManager {
   }
 }
 
-export { CollabManager, CollabUser, CollabEvent, CollabDocument, CollabConfig };
-
 // Utility: Generate consistent user color from ID
 export function generateUserColor(userId: string): string {
   let hash = 0;
@@ -581,7 +469,7 @@ export function generateUserColor(userId: string): string {
 }
 
 // Utility: Create user presence object
-export function createUserPresence(userId: string, name: string, color?: string) {
+export function createUserPresence(userId: string, name: string, color?: string): CollabUser {
   return {
     id: userId,
     name,
@@ -591,4 +479,4 @@ export function createUserPresence(userId: string, name: string, color?: string)
   };
 }
 
-export { Y } from "yjs";
+export { Y };

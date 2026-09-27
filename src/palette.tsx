@@ -138,7 +138,7 @@ export function CommandPalette({
           ))}
         </>
       )}
-      <Box marginTop={1} borderTopStyle="single" borderColor="#25262D" paddingTop={1}>
+      <Box marginTop={1} borderStyle="single" borderColor="#25262D" paddingTop={1}>
         <Text dimColor color="#7c8390">
           ↑↓ navigate · Enter select · Esc cancel · type to filter
         </Text>

@@ -228,7 +228,7 @@ export class Doctor {
       };
     }
 
-    for (const [name, server] of Object.entries(mcpServers)) {
+    for (const [name, server] of Object.entries(mcpServers) as Array<[string, import("./types.ts").McpServerConfig]>) {
       try {
         let url: string;
         if (server.url) {
@@ -264,7 +264,7 @@ export class Doctor {
 
   private async checkPlugins(): Promise<DiagnosticResult> {
     const { loadPlugins } = await import("./plugins/loader.ts");
-    const plugins = await loadPlugins();
+    const plugins = await loadPlugins([]);
 
     let loaded = 0;
     let failed = 0;

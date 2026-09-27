@@ -77,6 +77,8 @@ export interface GoatConfig {
   remoteAgents?: { name: string; url: string }[];
   /** Raw parsed config.json — read-only passthrough for keys without a typed field (e.g. serve.port). */
   raw?: Record<string, any>;
+  /** Set true after the first-run wizard completes so it isn't shown again. */
+  onboardingComplete?: boolean;
 }
 
 export function appDir(): string {

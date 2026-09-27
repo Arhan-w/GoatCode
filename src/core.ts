@@ -8,9 +8,7 @@ import { SessionDatabase, sessionDB } from "./session-db.ts";
 import { SkillManager, skillsManager } from "./skills.ts";
 import { McpServer, McpClient } from "./mcp-enhanced.ts";
 import { CollabManager, CollabSessionManager } from "./collab.ts";
-import { semanticSearch } from "./code/semantic.ts";
-import { sessionDB } from "./session-db.ts";
-import { skillsManager } from "./skills.ts";
+import { semanticSearch, getEmbeddingModel, indexCodebase, getVectorIndex } from "./code/semantic.ts";
 
 export interface GoatCodeConfig {
   enablePlanning: boolean;
@@ -37,7 +35,7 @@ export class GoatCodeCore {
   private skillManager: any;
   private mcpServer: any;
   private collabManager: any;
-  
+
   constructor(config: Partial<GoatCodeConfig> = {}) {
     this.config = {
       enablePlanning: config.enablePlanning ?? true,
@@ -67,7 +65,7 @@ export class GoatCodeCore {
     // Initialize semantic search
     if (this.config.enableSemanticSearch) {
       try {
-        await semanticSearch.initialize();
+        await getEmbeddingModel().initialize();
         console.log("Semantic search initialized");
       } catch (e) {
         console.warn("Semantic search unavailable:", e);
@@ -95,8 +93,8 @@ export class GoatCodeCore {
   async initializeSemanticSearch(roots: Map<string, string>) {
     if (!this.config.enableSemanticSearch) return;
     try {
-      await semanticSearch.initialize();
-      await semanticSearch.indexCodebase(new Map(), (progress) => {
+      await getEmbeddingModel().initialize();
+      await indexCodebase(new Map(), (progress) => {
         console.log(`Indexing: ${progress.done}/${progress.total}`);
       });
     } catch (e) {
@@ -107,7 +105,7 @@ export class GoatCodeCore {
   async searchCode(query: string, opts: { k?: number; hybrid?: boolean } = {}) {
     if (!this.config.enableSemanticSearch) return [];
     try {
-      return await semanticSearch.search(query, opts.k || 10);
+      return await semanticSearch(query, getVectorIndex(), opts.k || 10);
     } catch (e) {
       console.warn("Semantic search failed:", e);
       return [];
@@ -134,7 +132,7 @@ export class GoatCodeCore {
   }
 
   // Collaboration
-  createCollabSession(roomName: string, config: any) {
+  async createCollabSession(roomName: string, config: any) {
     const { CollabManager } = await import("./collab.ts");
     const manager = new CollabManager({
       roomName: config.roomName,

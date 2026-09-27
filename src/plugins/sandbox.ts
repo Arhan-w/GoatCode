@@ -116,7 +116,7 @@ export function createSandbox(config: SandboxConfig): SandboxSession {
   }
 
   // Spawn child process
-  const process = spawn("bun", [...args, config.entryPoint], {
+  const sandboxProcess = spawn("bun", [...args, config.entryPoint], {
     cwd: workDir,
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -126,7 +126,7 @@ export function createSandbox(config: SandboxConfig): SandboxSession {
   const session: SandboxSession = {
     id,
     pluginName: config.entryPoint.split("/").pop()?.replace(".ts", "") ?? id,
-    process,
+    process: sandboxProcess,
     startTime: Date.now(),
     stdout: "",
     stderr: "",
@@ -134,27 +134,27 @@ export function createSandbox(config: SandboxConfig): SandboxSession {
   };
 
   // Collect stdout
-  process.stdout?.on("data", (data: Buffer) => {
+  sandboxProcess.stdout?.on("data", (data: Buffer) => {
     const text = data.toString("utf8");
     session.stdout += text;
     config.onStdout?.(text);
   });
 
   // Collect stderr
-  process.stderr?.on("data", (data: Buffer) => {
+  sandboxProcess.stderr?.on("data", (data: Buffer) => {
     const text = data.toString("utf8");
     session.stderr += text;
     config.onStderr?.(text);
   });
 
   // Handle exit
-  process.on("exit", (code, signal) => {
+  sandboxProcess.on("exit", (code, signal) => {
     session.terminated = true;
     config.onExit?.(code, signal);
     sandboxSessions.delete(id);
   });
 
-  process.on("error", (err) => {
+  sandboxProcess.on("error", (err) => {
     session.terminated = true;
     config.onStderr?.(`Sandbox error: ${err.message}\n`);
     sandboxSessions.delete(id);

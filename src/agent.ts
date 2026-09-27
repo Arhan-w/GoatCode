@@ -9,7 +9,7 @@ import { Session, summarize } from "./session.ts";
 import { ToolKit, getToolSpec, type PermissionFn, type Todo, type ToolResult } from "./tools.ts";
 import { fireHooks, MAX_STOP_HOOK_CONTINUES } from "./hooks.ts";
 import { SUBAGENT_MAX_STEPS } from "./constants.ts";
-import { ConfigError, ProviderError, AuthError, RateLimitError } from "./errors.ts";
+import { ConfigError, ProviderError, AuthError, RateLimitError, GoatError, GenericError } from "./errors.ts";
 
 export const COMPACT_TRIGGER_CHARS = 220_000;
 /** Attempt budget for transient LLM failures (429/5xx/network) within one step. */
@@ -327,7 +327,7 @@ export class Agent {
         }
         return;
       } catch (e: any) {
-        const err = e instanceof GoatError ? e : new GoatError('ERR_GENERIC', `${e?.name ?? "Error"}: ${e?.message ?? e}`, {
+        const err = e instanceof GoatError ? e : new GenericError(`${e?.name ?? "Error"}: ${e?.message ?? e}`, {
           suggestion: 'Check provider status or try a different provider'
         });
         if (timedOut && !signal?.aborted)

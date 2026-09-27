@@ -9,8 +9,9 @@
  */
 
 import { SSE_MIN_CHUNK_CHARS, SSE_MAX_LATENCY_MS } from "./constants.ts";
-import { PROVIDER_RATE_LIMITS, RateLimiterConfig } from "./providers.ts";
-import { TokenBucketRateLimiter, RateLimiterRegistry } from "./rate-limiter.ts";
+import { PROVIDER_RATE_LIMITS } from "./providers.ts";
+import { GOATED_FLASH_ID } from "./gflash.ts";
+import { TokenBucketRateLimiter, RateLimiterRegistry, type RateLimiterConfig } from "./rate-limiter.ts";
 
 export interface ToolSpec {
   name: string;
