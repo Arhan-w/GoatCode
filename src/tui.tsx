@@ -18,7 +18,7 @@ import { Agent, type AgentEvent } from "./agent.ts";
 import { COMMAND_DESC, SLASH_COMMANDS, runSlash, type SlashIO } from "./commands.tsx";
 import { appDir, loadConfig, saveConfig, splitModel, resolveRepos, type GoatConfig } from "./config.ts";
 import { registerRemoteAgents } from "./index-shared.ts";
-import { shouldShowOnboarding } from "./onboarding.ts";
+import { shouldShowOnboarding, runFirstRunWizard } from "./onboarding.ts";
 import { VERSION } from "./constants.ts";
 import { contextPct } from "./window.ts";
 import { atCompletions, listProjectFiles } from "./refs.ts";
