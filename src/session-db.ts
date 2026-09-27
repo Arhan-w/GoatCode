@@ -279,7 +279,7 @@ class SessionDatabase {
       tags: JSON.parse(row.tags || "[]"),
       isBranch: Boolean(row.is_branch),
       parentSessionId: row.parent_session_id
-    });
+    }));
   }
 
   // Session snapshots
@@ -380,7 +380,7 @@ class SessionDatabase {
       tags: JSON.parse(row.tags || "[]"),
       isBranch: Boolean(row.is_branch),
       parentSessionId: row.parent_session_id
-    });
+    }));
   }
 
   // Delete session

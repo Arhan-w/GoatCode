@@ -5,7 +5,6 @@
 import { mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { appDir } from "../config.ts";
-import { mkdirSync, writeFileSync } from "node:fs";
 
 export interface SkillManifest {
   name: string;
@@ -461,23 +460,6 @@ export class SkillManager {
     await this.loadSkill(skillData.name, skillDir);
   }
 
-  private async loadSkillsFromDir(dir: string): Promise<void> {
-    try {
-      const entries = readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const skillPath = join(dir, entry.name);
-          const manifestPath = join(skillPath, "skill.json");
-          if (existsSync(manifestPath)) {
-            await this.loadSkill(entry.name, skillPath);
-          }
-        }
-      }
-    } catch (e) {
-      // Directory might not exist
-    }
-  }
-
   private async updateMarketplaceIndex(): Promise<void> {
     if (!this.registryUrl) return;
     try {
@@ -490,21 +472,6 @@ export class SkillManager {
       }
     } catch (e) {
       console.warn("Failed to update marketplace index:", e);
-    }
-  }
-
-  private validateManifest(manifest: SkillManifest): void {
-    if (!manifest.name || !manifest.version || !manifest.main) {
-      throw new Error("Invalid skill manifest: missing required fields");
-    }
-  }
-
-  private async checkDependencies(manifest: SkillManifest): Promise<void> {
-    if (!manifest.dependencies) return;
-    for (const [dep, version] of Object.entries(manifest.dependencies)) {
-      if (!this.skills.has(dep)) {
-        await this.installSkill(dep, version);
-      }
     }
   }
 
@@ -610,10 +577,11 @@ export class SkillManager {
           list: () => [],
           get: (name: string) => null
         }
-      };
-    }
+      },
+    };
+  }
 
-    private sanitizePath(baseDir: string, path: string): string {
+  private sanitizePath(baseDir: string, path: string): string {
       const resolved = resolve(baseDir, path);
       const base = resolve(baseDir);
       if (!resolved.startsWith(base)) {
@@ -638,10 +606,11 @@ export class SkillManager {
             await this.loadSkill(entry.name, skillPath);
           }
         }
-      } catch (e) {
-        // Directory might not exist
       }
+    } catch (e) {
+      // Directory might not exist
     }
+  }
 
   private registerExports(skillName: string, exports: SkillExports): void {
     if (exports.commands) {
@@ -730,9 +699,7 @@ export interface LoadedSkill {
 }
 
 const skillsManager = new SkillManager([join(appDir(), "skills")]);
-export { SkillManager, skillsManager };
-
-export { SkillManifest, SkillPermission, SkillExports, SkillCommand, SkillHook, SkillTool, SkillProvider, SkillContext, SkillAPI, SkillLogger, SkillStorage, SkillEventEmitter, SkillContext, SkillLogger, SkillStorage, SkillEventEmitter };
+export { skillsManager };
 
 // Marketplace index type
 interface MarketplaceIndex {
