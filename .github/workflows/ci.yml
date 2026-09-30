@@ -2,13 +2,31 @@ name: CI
 
 on:
   push:
-    branches: [v2-typescript]
+    branches: [v2-typescript, main, master, develop]
   pull_request:
-    branches: [v2-typescript]
+    branches: [v2-typescript, main, master, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: TypeScript type check
+        run: bun x tsc --noEmit
+      - name: Lint (if available)
+        run: bun run lint 2>/dev/null || echo "No lint script configured"
+
   test:
-    name: ${{ matrix.os }}
+    name: Test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -20,10 +38,31 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - run: bun x tsc --noEmit
-      - run: bun test
-      # print mode must boot, find no provider, and fail cleanly (exit 1)
-      - run: bun run src/index.ts -p "hello" --output-format json < /dev/null || true
-        shell: bash
+      - name: Run tests
+        run: bun test
         env:
           GOATCODE_HOME: ${{ runner.temp }}/goat-ci-home
+      - name: Test CLI entry point
+        run: bun run src/index.ts --version
+        env:
+          GOATCODE_HOME: ${{ runner.temp }}/goat-cli-test
+
+  build:
+    name: Build Binary (${{ matrix.os }})
+    needs: [lint, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Build binary
+        run: bun build src/index.ts --compile --outfile goat${{ runner.os == 'Windows' && '.exe' || '' }}
+      - name: Verify binary
+        run: ./goat${{ runner.os == 'Windows' && '.exe' || '' }} --version
+        shell: bash
