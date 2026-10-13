@@ -31,7 +31,6 @@ import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
 import { resolve, resolveSmall, resolveFallbacks } from "./runtime.ts";
 import { costUsd } from "./pricing.ts";
 import { Agent } from "./agent.ts";
-import { EnhancedAgent } from "./agent-enhanced.ts";
 import { ToolKit } from "./tools.ts";
 import { Session } from "./session.ts";
 import { loadSkills } from "./skills/loader.ts";
@@ -512,7 +511,7 @@ async function main(): Promise<number> {
           tools.registerExternal({ spec, run: (args) => mcp!.dispatch(spec.name, args) });
       } catch { /* mcp optional in print mode */ }
     }
-    const agent = new EnhancedAgent({
+    const agent = new Agent({
       client: r.client, smallClient: (await resolveSmall(cfg, registry)) ?? undefined,
       fallbacks: await resolveFallbacks(cfg, registry),
       session, tools,
@@ -520,8 +519,6 @@ async function main(): Promise<number> {
       cache: cfg.cachePrompts,
       extraSystem: [buildExtraSystem(allSkills(cfg), process.cwd(), resolveRepos(cfg.repos, process.cwd())),
         loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
-      enablePlanning: true,
-      enableReasoning: true,
     });
     let out = "";
     let failed = "";
