@@ -152,6 +152,71 @@ describe("tools", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  test("multiedit applies hunks in order atomically", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-multi-"));
+    writeFileSync(join(root, "c.ts"), "const a = 1;\nconst b = 2;\nconst c = 3;\n");
+    const tk = new ToolKit(root, { autoApprove: true });
+    const r = await tk.dispatch("multiedit", { path: "c.ts", edits: [
+      { old_string: "const a = 1;", new_string: "const a = 10;" },
+      { old_string: "const b = 2;", new_string: "const b = 20;" },
+    ] });
+    expect(r.ok).toBe(true);
+    expect(r.output).toContain("2 edits applied");
+    const after = readFileSync(join(root, "c.ts"), "utf8");
+    expect(after).toContain("const a = 10;");
+    expect(after).toContain("const b = 20;");
+    expect(after).toContain("const c = 3;"); // untouched
+    // one undo reverts the whole batch
+    const u = await tk.dispatch("undo", {});
+    expect(u.ok).toBe(true);
+    expect(readFileSync(join(root, "c.ts"), "utf8")).toContain("const a = 1;");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("multiedit is all-or-nothing on a failed hunk", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-multi-"));
+    const before = "keep me\n";
+    writeFileSync(join(root, "d.txt"), before);
+    const tk = new ToolKit(root, { autoApprove: true });
+    const r = await tk.dispatch("multiedit", { path: "d.txt", edits: [
+      { old_string: "keep me", new_string: "changed" },
+      { old_string: "does not exist", new_string: "x" },
+    ] });
+    expect(r.ok).toBe(false);
+    expect(r.output).toContain("NOTHING was written");
+    expect(readFileSync(join(root, "d.txt"), "utf8")).toBe(before); // untouched
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("multiedit later hunks see earlier hunks' output", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-multi-"));
+    writeFileSync(join(root, "e.txt"), "alpha\n");
+    const tk = new ToolKit(root, { autoApprove: true });
+    const r = await tk.dispatch("multiedit", { path: "e.txt", edits: [
+      { old_string: "alpha", new_string: "beta" },
+      { old_string: "beta", new_string: "gamma" },
+    ] });
+    expect(r.ok).toBe(true);
+    expect(readFileSync(join(root, "e.txt"), "utf8")).toBe("gamma\n");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("multiedit replace_all replaces every occurrence", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-multi-"));
+    writeFileSync(join(root, "f.txt"), "x x x\n");
+    const tk = new ToolKit(root, { autoApprove: true });
+    const r = await tk.dispatch("multiedit", { path: "f.txt", edits: [
+      { old_string: "x", new_string: "y", replace_all: true },
+    ] });
+    expect(r.ok).toBe(true);
+    expect(readFileSync(join(root, "f.txt"), "utf8")).toBe("y y y\n");
+    rmSync(root, { recursive: true, force: true });
+  });
+
   test("read streaming for large files (>100KB)", async () => {
     const { ToolKit } = await import("../src/tools.ts");
     const root = mkdtempSync(join(tmpdir(), "goat-stream-"));

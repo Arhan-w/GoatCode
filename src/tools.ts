@@ -349,7 +349,7 @@ export class ToolKit {
       const ext = this.external.get(name);
       // Claude wire-compat: file tools report their arg as file_path
       const hookArgs = { ...args };
-      if ((name === "read" || name === "write" || name === "edit") && args.path !== undefined)
+      if ((name === "read" || name === "write" || name === "edit" || name === "multiedit") && args.path !== undefined)
         hookArgs.file_path = args.path;
       const hookPayload = () => ({
         session_id: this.sessionId, transcript_path: "", cwd: this.root,
@@ -682,6 +682,47 @@ export class ToolKit {
     return { ok: true, output: `edited ${args.path}` };
   }
 
+  /**
+   * Atomic multi-hunk edit: applies every {old_string,new_string} pair to one
+   * file in order, all-or-nothing — if any hunk fails to match (or matches
+   * non-uniquely) NOTHING is written. Hunks apply sequentially, so a later
+   * hunk may match text an earlier hunk produced. Single undo record covers
+   * the whole batch.
+   */
+  async tool_multiedit(args: Record<string, any>): Promise<ToolResult> {
+    let p: string;
+    try { p = this.inside(String(args.path), args.repo ? String(args.repo) : undefined); }
+    catch (e: any) { return { ok: false, output: e.message }; }
+    const denied = await this.ask("multiedit", { ...args, _rulePaths: this.ruleForms(p) });
+    if (denied) return denied;
+    if (!existsSync(p)) return { ok: false, output: `not a file: ${args.path}` };
+    const edits = Array.isArray(args.edits) ? args.edits : [];
+    if (!edits.length) return { ok: false, output: "edits must be a non-empty array of {old_string, new_string}" };
+    if (edits.length > 200) return { ok: false, output: `too many edits (${edits.length}); split across multiple multiedit calls` };
+
+    const original = readFileSync(p, "utf8");
+    let text = original;
+    const applied: Array<{ old: string; neu: string }> = [];
+    for (let i = 0; i < edits.length; i++) {
+      const e = edits[i];
+      if (!e || typeof e !== "object") return { ok: false, output: `edits[${i}] is not an object` };
+      const old = String(e.old_string ?? "");
+      const neu = String(e.new_string ?? "");
+      if (!old) return { ok: false, output: `edits[${i}].old_string is empty (use the write tool to replace a whole file)` };
+      const count = text.split(old).length - 1;
+      if (count === 0)
+        return { ok: false, output: `edits[${i}]: old_string not found — NOTHING was written (all-or-nothing). Read the file and retry with corrected hunks.` };
+      if (count > 1 && e.replace_all !== true)
+        return { ok: false, output: `edits[${i}]: old_string matches ${count} times — make it unique or pass replace_all:true. NOTHING was written.` };
+      text = e.replace_all === true ? text.split(old).join(neu) : text.replace(old, neu);
+      applied.push({ old, neu });
+    }
+    if (text === original) return { ok: true, output: `multiedit ${args.path}: no changes (all hunks were no-ops)` };
+    writeFileSync(p, text, "utf8");
+    this.snap(p, true, original, text);
+    return { ok: true, output: `multiedit ${args.path}: ${applied.length} edit${applied.length === 1 ? "" : "s"} applied` };
+  }
+
   tool_bash(args: Record<string, any>): Promise<ToolResult> {
     return new Promise(async (done) => {
       const denied = await this.ask("bash", args);
@@ -1006,6 +1047,10 @@ const TOOL_DEPS: Record<string, ToolDeps> = {
     readSet: () => [],
     writeSet: (args) => [`file:${String(args.path ?? "")}`],
   },
+  multiedit: {
+    readSet: () => [],
+    writeSet: (args) => [`file:${String(args.path ?? "")}`],
+  },
   bash: {
     readSet: (args) => [`cmd:${String(args.command ?? "").slice(0, 64)}`],
     writeSet: (args) => [`cmd:${String(args.command ?? "").slice(0, 64)}`],
@@ -1089,6 +1134,17 @@ function builtinSpecs(): ToolSpec[] {
         new_string: { type: "string" },
         streaming: { type: "boolean", description: "Force streaming mode for large files (auto-enabled for files >100KB)" },
       }, required: ["path", "old_string", "new_string"] } },
+    { name: "multiedit", description: "Apply several exact string replacements to ONE file in order, atomically — if any hunk fails, nothing is written and one undo reverts the whole batch. Later hunks see earlier hunks' output. Prefer this over repeated edit calls on the same file. Pass replace_all:true on a hunk to replace every occurrence.",
+      parameters: { type: "object", properties: {
+        path: { type: "string" },
+        repo: repoDesc,
+        edits: { type: "array", description: "Ordered hunks", items: {
+          type: "object", properties: {
+            old_string: { type: "string", description: "Exact text to replace, unique in the current file state" },
+            new_string: { type: "string" },
+            replace_all: { type: "boolean", description: "Replace every occurrence instead of requiring uniqueness" },
+          }, required: ["old_string", "new_string"] } },
+      }, required: ["path", "edits"] } },
     { name: "bash", description: "Run a shell command in the project directory. Set background=true for long jobs; poll results with the tasks tool.",
       parameters: { type: "object", properties: {
         command: { type: "string" },

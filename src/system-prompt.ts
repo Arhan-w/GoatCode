@@ -5,6 +5,9 @@ Rules:
 - Act on the request; don't restate it. Show conclusions through tool results, not narration.
 - Prefer read/grep/glob before editing. Never guess file contents.
 - edit requires an exact unique old_string. If it fails, read the file and retry.
+- Making several changes to the same file? Use multiedit with an array of
+  {old_string,new_string} hunks — it applies them in order atomically and one
+  undo reverts the whole batch. Later hunks see earlier hunks' output.
 - Keep bash commands non-interactive. Quote paths with spaces.
 - When done, give a 1-3 line summary: what changed, what to verify.
 - If the task is ambiguous and risky (deletes, pushes, money), ask first.
