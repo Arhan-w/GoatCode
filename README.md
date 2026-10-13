@@ -70,6 +70,7 @@ GoatCode is **the only AI coding agent** that gives you:
 | Feature | GoatCode | Claude Code | Cursor | OpenCode |
 | :--- | :---: | :---: | :---: | :---: |
 | **LLM Providers** | **180+** | Anthropic only | Closed | Multi |
+| **Built-in IDE** | ✅ Monaco web IDE (`goat ide`) | ❌ Terminal only | Proprietary | ❌ Terminal only |
 | **Multi-Repo Workspace** | ✅ | ❌ | ❌ | ❌ |
 | **Code Intelligence** | ✅ Tree-sitter + Semantic | ❌ Basic | Limited | ❌ |
 | **Live Collaboration** | ✅ P2P Relay | ❌ | ❌ | ❌ |
@@ -183,6 +184,26 @@ Switch models anytime:
 
 ---
 
+## 🖥️ GoatCode IDE
+
+Launch a full local web IDE — Monaco editor (the VS Code engine, MIT) with the same agent embedded:
+
+```bash
+goat ide
+```
+
+That opens `http://127.0.0.1:<port>/?token=...` in your browser:
+
+- **Explorer** — project tree, lazy loading, safe to any workspace
+- **Editor** — Monaco with the noir theme, tabs, dirty markers, Ctrl+S save, TypeScript/JSON/HTML/CSS language services, syntax highlighting for 90+ languages
+- **Agent chat** — the exact same engine as the terminal: tools stream live (glob → read → edit → bash), plan todos render inline, permission prompts are clickable cards, and every file the agent touches refreshes the explorer
+- **Modes** — ask / accept-edits / plan / bypass, switched from the title bar
+- **Local-only** — binds 127.0.0.1 with a per-boot token; nothing leaves your machine except model calls
+
+`--port N` picks a port; `--no-open` skips opening the browser.
+
+---
+
 ## 🏗️ Architecture & Development
 
 GoatCode is built with clean, modular **TypeScript** and **Bun**:
@@ -190,7 +211,10 @@ GoatCode is built with clean, modular **TypeScript** and **Bun**:
 ```
 src/
 ├── agent.ts              # Main agent loop & subagent orchestration
-├── agent-enhanced.ts     # ReAct & Plan-and-Execute patterns
+├── ide/                  # GoatCode IDE — Monaco web editor + embedded agent
+│   ├── server.ts         # Local HTTP+SSE server (token auth, path jail)
+│   ├── index.html        # IDE shell: explorer, tabs, editor, chat
+│   └── vendor/vs/        # Vendored Monaco engine (MIT, offline)
 ├── code/                 # Code intelligence
 │   ├── indexer.ts        # Tree-sitter AST parsing + WASM fallback
 │   ├── find.ts           # Ranked symbol search (keyword + semantic)
@@ -206,14 +230,14 @@ src/
 │   ├── loader.ts         # Signed tar+gzip extraction
 │   ├── sandbox.ts        # Plugin sandboxing with resource limits
 │   └── marketplace.ts    # Marketplace integration
-├── tools.ts              # File, search, shell, workspace tools
-├── session.ts            # Append-only JSONL persistence, crash recovery
+├── tools.ts              # File, search, shell, workspace, multiedit tools
+├── session.ts            # Atomic JSONL persistence, crash recovery
 ├── llm.ts                # LLM provider abstraction, streaming, rate limiting
 ├── providers.ts          # 180+ provider catalog with lazy loading
 ├── doctor.ts             # System diagnostics (8-point health check)
 ├── palette.tsx           # Command palette (Ctrl+P)
 ├── virtual-list.tsx      # Windowed TUI list rendering
-├── onboarding.tsx        # First-run setup wizard
+├── onboarding.ts         # First-run setup wizard
 ├── rate-limiter.ts       # Token bucket rate limiting
 ├── tui.tsx               # Ink-based TUI with noir theme
 └── index.ts              # CLI entry point
@@ -252,6 +276,9 @@ Automatic ephemeral block wrapping cuts input costs by **90%** on repeated messa
 
 ### 🔄 Smart Failover
 Circuit breaker detects rate limits (429) and transient errors, automatically rotating to fallback models.
+
+### ✂️ Atomic Multi-Edit
+The `multiedit` tool applies several exact replacements to one file in order, all-or-nothing — a failed hunk writes nothing, and one undo reverts the whole batch.
 
 ### 📊 Context Meter & `/rewind`
 Real-time token usage progress bar. Roll back to any checkpoint in your conversation history.
