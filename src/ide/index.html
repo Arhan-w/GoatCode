@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GoatCode IDE</title>
+<style>
+:root{
+  --bg:#0d0e12; --panel:#16171d; --panel2:#1c1e26; --panel3:#23252f;
+  --line:#262933; --line2:#313544;
+  --text:#e8eaf0; --dim:#8b93a7; --faint:#5b6377;
+  --accent:#a855f7; --accent-dim:#7e3ff2; --accent-soft:#a855f71c;
+  --green:#4ade80; --red:#f87171; --amber:#facc15; --blue:#60a5fa;
+  --mono:ui-monospace,"Cascadia Code",Consolas,"SF Mono",Menlo,monospace;
+  --sans:"Segoe UI",Inter,system-ui,-apple-system,Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);display:flex;flex-direction:column}
+::selection{background:#a855f755}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#2a3044;border-radius:8px}
+::-webkit-scrollbar-thumb:hover{background:#3a4260}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- title bar ---------- */
+#titlebar{display:flex;align-items:center;gap:12px;height:44px;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:none;user-select:none}
+.logo{display:flex;align-items:center;gap:8px;font-weight:650;font-size:14.5px;letter-spacing:.2px}
+.logo .goat{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#5b21b6);display:grid;place-items:center;font-size:14px}
+.logo b{color:var(--accent)}
+.tb-pill{font:12px/1 var(--mono);color:var(--dim);border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:5px 10px;display:inline-flex;gap:7px;align-items:center;white-space:nowrap}
+.tb-pill select{all:unset;cursor:pointer;color:var(--text);font:12px/1 var(--mono);max-width:200px}
+.tb-pill select option{background:var(--panel)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex:none}
+.dot.busy{background:var(--amber);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.3}}
+.spacer{flex:1}
+.tb-btn{font:600 12px var(--sans);border-radius:8px;padding:6px 12px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer}
+.tb-btn:hover{border-color:var(--faint)}
+.tb-btn.accent{background:var(--accent);border-color:var(--accent);color:#fff}
+.tb-btn.accent:hover{background:var(--accent-dim)}
+
+/* ---------- main ---------- */
+#main{flex:1;display:flex;min-height:0}
+#sidebar{width:250px;flex:none;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+.sb-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;font:11px var(--mono);letter-spacing:.5px;text-transform:uppercase;color:var(--faint)}
+.sb-head button{all:unset;cursor:pointer;color:var(--dim);font-size:13px;padding:0 4px}
+.sb-head button:hover{color:var(--text)}
+#tree{flex:1;overflow-y:auto;padding:2px 6px 12px}
+.tree-item{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;font-size:13.5px;color:var(--dim)}
+.tree-item:hover{background:var(--panel2);color:var(--text)}
+.tree-item.active{background:var(--accent-soft);color:var(--accent)}
+.tree-item .ico{width:16px;text-align:center;flex:none;font-size:12px}
+.tree-item .name{overflow:hidden;text-overflow:ellipsis}
+.tree-children{padding-left:14px}
+.tree-children.collapsed{display:none}
+
+/* ---------- editor ---------- */
+#editorCol{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+#tabs{display:flex;align-items:flex-end;gap:2px;height:36px;padding:0 8px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;flex:none}
+.tab{display:flex;align-items:center;gap:7px;height:32px;padding:0 12px;font:13px var(--sans);color:var(--dim);border-radius:8px 8px 0 0;cursor:pointer;white-space:nowrap;border:1px solid transparent;border-bottom:none}
+.tab:hover{color:var(--text);background:var(--panel2)}
+.tab.active{color:var(--text);background:var(--bg);border-color:var(--line);position:relative}
+.tab.active::after{content:"";position:absolute;top:-1px;left:0;right:0;height:2px;background:var(--accent)}
+.tab .close{all:unset;cursor:pointer;color:var(--faint);font-size:13px;padding:0 2px;border-radius:4px}
+.tab .close:hover{color:var(--red);background:#f8717122}
+.tab .dirty{width:7px;height:7px;border-radius:50%;background:var(--amber);flex:none}
+#editor{flex:1;min-height:0}
+#statusbar{display:flex;align-items:center;gap:14px;height:26px;padding:0 14px;background:var(--panel);border-top:1px solid var(--line);font:12px var(--mono);color:var(--dim);flex:none;user-select:none}
+#statusbar .sb{display:flex;gap:14px}
+
+/* ---------- right panel: chat ---------- */
+#chatPanel{width:420px;flex:none;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+.chat-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex:none}
+.chat-head .t{font-weight:650;font-size:13.5px}
+.chat-head .sub{font:11.5px var(--mono);color:var(--faint)}
+#chatScroll{flex:1;overflow-y:auto;padding:14px 14px 8px;display:flex;flex-direction:column;gap:12px}
+.welcome{text-align:center;padding:36px 10px;color:var(--dim)}
+.welcome .wgoat{font-size:38px;margin-bottom:8px}
+.welcome h3{font-size:17px;color:var(--text);margin-bottom:6px}
+.welcome p{font-size:12.5px;max-width:340px;margin:0 auto}
+.welcome code{font:12px var(--mono);background:var(--panel3);border:1px solid var(--line);padding:1px 6px;border-radius:6px;color:#d8c7ff}
+.msg-user{display:flex;gap:9px;align-items:flex-start}
+.msg-user .who{font:700 11px var(--mono);color:var(--accent);padding-top:5px;flex:none}
+.msg-user .bubble{background:var(--panel2);border:1px solid var(--line);border-radius:12px 12px 12px 4px;padding:8px 12px;white-space:pre-wrap;word-break:break-word;font-size:13.5px}
+.msg-asst{font-size:13.5px}
+.msg-asst p{margin:0 0 8px}.msg-asst p:last-child{margin-bottom:0}
+.msg-asst code{font:12px var(--mono);background:var(--panel3);border:1px solid var(--line);padding:1px 5px;border-radius:5px;color:#d8c7ff}
+.msg-asst pre{background:#101218;border:1px solid var(--line);border-radius:9px;padding:11px 13px;overflow-x:auto;margin:0 0 9px}
+.msg-asst pre code{background:none;border:none;padding:0;color:var(--text)}
+.msg-asst ul{margin:0 0 8px 18px}
+.msg-asst h1,.msg-asst h2,.msg-asst h3{font-size:14px;margin:10px 0 6px}
+.msg-asst a{color:var(--accent);text-decoration:none}
+.streaming::after{content:"▍";color:var(--accent);animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.tool-row{border:1px solid var(--line);border-radius:9px;background:var(--panel2);overflow:hidden;font-size:12.5px}
+.tool-row .head{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;user-select:none}
+.tool-row .head:hover{background:var(--panel3)}
+.tool-row .bullet{width:7px;height:7px;border-radius:50%;background:var(--amber);flex:none}
+.tool-row.ok .bullet{background:var(--green)}
+.tool-row.err .bullet{background:var(--red)}
+.tool-row .name{font:600 12px var(--mono)}
+.tool-row .arg{font:11px var(--mono);color:var(--dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-row .state{font:10.5px var(--mono);color:var(--faint)}
+.tool-row .body{display:none;border-top:1px solid var(--line);background:#101218;padding:8px 10px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:11px/1.5 var(--mono);color:#aab2c5}
+.tool-row.open .body{display:block}
+.plan{border:1px solid var(--line);border-radius:9px;background:var(--panel2);padding:9px 12px;font-size:12.5px}
+.plan .t{color:var(--dim);font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px}
+.plan .row{display:flex;gap:7px;padding:2px 0}
+.plan .st{width:13px;text-align:center;flex:none}
+.plan .done{color:var(--green)}.plan .prog{color:var(--accent)}.plan .pend{color:var(--faint)}
+.plan .row .done{text-decoration:line-through;color:var(--faint)}
+.note{color:var(--dim);font-size:12px;border:1px dashed var(--line);border-radius:8px;padding:6px 10px}
+.errline{color:var(--red);font-size:12.5px}
+.retryline{color:var(--amber);font:11.5px var(--mono)}
+.perm{border:1px solid var(--accent);border-radius:11px;background:linear-gradient(180deg,#1a1430,#16171d);padding:12px 14px;box-shadow:0 0 0 4px #a855f714}
+.perm h4{font-size:13px;margin-bottom:3px}
+.perm h4 span{color:var(--accent)}
+.perm .cmd{font:11.5px var(--mono);color:var(--dim);background:#101218;border:1px solid var(--line);border-radius:7px;padding:7px 9px;margin:7px 0;white-space:pre-wrap;word-break:break-all;max-height:110px;overflow:auto}
+.perm .btns{display:flex;gap:8px;justify-content:flex-end}
+.btn{font:600 12.5px var(--sans);border-radius:7px;padding:7px 13px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer}
+.btn:hover{border-color:var(--faint)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-dim)}
+.btn.danger{color:var(--red)}
+.think{display:flex;align-items:center;gap:9px;color:var(--dim);font-size:12.5px}
+.spin{color:var(--accent);animation:rot 1s steps(6) infinite;display:inline-block}
+@keyframes rot{to{transform:rotate(360deg)}}
+.chat-foot{flex:none;border-top:1px solid var(--line);padding:10px 12px}
+.composer{border:1px solid var(--line);border-radius:11px;background:var(--panel2);transition:border-color .15s,box-shadow .15s}
+.composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px #a855f722}
+.composer textarea{width:100%;background:transparent;border:none;outline:none;resize:none;color:var(--text);font:13.5px/1.5 var(--sans);padding:10px 12px 4px;max-height:160px;display:block}
+.composer .bar{display:flex;align-items:center;gap:8px;padding:5px 9px 8px 12px;color:var(--faint);font-size:11px}
+.composer .keys{flex:1}
+kbd{font:10.5px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;background:var(--panel3);color:var(--dim)}
+.sendbtn{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:var(--accent);border:none;color:#fff;font-size:14px;cursor:pointer;padding:0}
+.sendbtn:disabled{opacity:.35;cursor:default}
+.sendbtn.stop{background:transparent;border:1px solid var(--red);color:var(--red)}
+
+@media (max-width:1100px){ #chatPanel{width:340px} #sidebar{width:210px} }
+</style>
+</head>
+<body>
+
+<div id="titlebar">
+  <div class="logo"><span class="goat">🐐</span><span><b>Goat</b>Code IDE</span></div>
+  <span class="tb-pill"><span class="dot" id="busyDot"></span><span id="statusTxt">ready</span></span>
+  <div class="spacer"></div>
+  <span class="tb-pill" title="model">
+    <select id="modelSel"></select>
+  </span>
+  <span class="tb-pill" title="permission mode">
+    <select id="modeSel">
+      <option value="default">ask</option>
+      <option value="acceptEdits">accept edits</option>
+      <option value="plan">plan</option>
+      <option value="bypass">bypass</option>
+    </select>
+  </span>
+  <span class="tb-pill" id="costPill" title="session cost · context tokens">— · — tok</span>
+</div>
+
+<div id="main">
+  <div id="sidebar">
+    <div class="sb-head"><span>Explorer</span><button id="refreshTree" title="refresh">⟳</button></div>
+    <div id="tree"></div>
+  </div>
+
+  <div id="editorCol">
+    <div id="tabs"></div>
+    <div id="editor"></div>
+    <div id="statusbar">
+      <div class="sb"><span id="stPath">no file</span><span id="stLang"></span></div>
+      <div class="spacer"></div>
+      <div class="sb"><span id="stPos">Ln 1, Col 1</span><span id="stVersion"></span></div>
+    </div>
+  </div>
+
+  <div id="chatPanel">
+    <div class="chat-head">
+      <div>
+        <div class="t">🐐 Agent</div>
+        <div class="sub" id="chatSub">same engine as the terminal</div>
+      </div>
+    </div>
+    <div id="chatScroll">
+      <div class="welcome" id="chatWelcome">
+        <div class="wgoat">🐐</div>
+        <h3>What should we build?</h3>
+        <p>Ask the agent to edit files, run commands, or explain code. It shares this workspace — edits open in the editor live.</p>
+      </div>
+    </div>
+    <div class="chat-foot">
+      <div class="composer">
+        <textarea id="chatInput" rows="1" placeholder="ask GoatCode… (Enter to send)"></textarea>
+        <div class="bar">
+          <span class="keys"><kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> newline</span>
+          <button class="sendbtn" id="chatSend" title="Send">↑</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/vendor/vs/loader.js"></script>
+<script src="/vendor/marked.umd.js"></script>
+<script>
+const TOKEN = new URLSearchParams(location.search).get("token");
+const $ = (s) => document.querySelector(s);
+const API = (path, opts={}) => fetch(path, { ...opts, headers: { "content-type": "application/json", "x-goat-token": TOKEN, ...(opts.headers||{}) } });
+
+/* ================= Monaco ================= */
+let editor = null;
+let models = new Map();       // path -> monaco model
+let tabs = [];                // [{path, dirty}]
+let activePath = null;
+
+require.config({ paths: { vs: "/vendor/vs" } });
+require(["vs/editor/editor.main"], () => {
+  monaco.editor.defineTheme("goat-noir", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [
+      { token: "comment", foreground: "5b6377", fontStyle: "italic" },
+      { token: "keyword", foreground: "c084fc" },
+      { token: "string", foreground: "4ade80" },
+      { token: "number", foreground: "fbbf24" },
+      { token: "type", foreground: "60a5fa" },
+      { token: "function", foreground: "a855f7" },
+      { token: "variable", foreground: "e8eaf0" },
+    ],
+    colors: {
+      "editor.background": "#0d0e12",
+      "editor.foreground": "#e8eaf0",
+      "editorLineNumber.foreground": "#3a3f52",
+      "editorLineNumber.activeForeground": "#a855f7",
+      "editor.selectionBackground": "#a855f744",
+      "editor.lineHighlightBackground": "#16171d",
+      "editorCursor.foreground": "#a855f7",
+      "editorIndentGuide.background1": "#22242e",
+      "editorIndentGuide.activeBackground1": "#3a3f52",
+      "editorGutter.background": "#0d0e12",
+      "editorWidget.background": "#16171d",
+      "editorWidget.border": "#313544",
+      "scrollbarSlider.background": "#2a304488",
+      "scrollbarSlider.hoverBackground": "#3a426088",
+    },
+  });
+  editor = monaco.editor.create(document.getElementById("editor"), {
+    theme: "goat-noir",
+    automaticLayout: true,
+    fontSize: 13.5,
+    fontFamily: 'ui-monospace, "Cascadia Code", Consolas, "SF Mono", Menlo, monospace',
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    smoothScrolling: true,
+    cursorBlinking: "phase",
+    renderLineHighlight: "all",
+    padding: { top: 10 },
+    bracketPairColorization: { enabled: true },
+  });
+  editor.onDidChangeCursorPosition((e) => {
+    $("#stPos").textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
+  });
+  window.IDE_READY = true;
+});
+
+function langOf(path) {
+  const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
+  const map = {
+    ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript",
+    ".mjs": "javascript", ".cjs": "javascript", ".py": "python", ".rs": "rust", ".go": "go",
+    ".java": "java", ".c": "c", ".h": "c", ".cpp": "cpp", ".hpp": "cpp", ".cs": "csharp",
+    ".rb": "ruby", ".php": "php", ".swift": "swift", ".md": "markdown", ".html": "html",
+    ".css": "css", ".scss": "scss", ".less": "less", ".json": "json", ".yml": "yaml",
+    ".yaml": "yaml", ".toml": "ini", ".ini": "ini", ".sql": "sql", ".sh": "shell",
+    ".bash": "shell", ".xml": "xml", ".svg": "xml", ".vue": "html", ".svelte": "html",
+  };
+  return map[ext] || "plaintext";
+}
+
+async function openFile(path) {
+  if (models.has(path)) { activateTab(path); return; }
+  const r = await API(`/api/file?path=${encodeURIComponent(path)}`);
+  const d = await r.json();
+  if (d.error) { addNote("✗ " + d.error, "errline"); return; }
+  const model = monaco.editor.createModel(d.content, langOf(path), monaco.Uri.parse("file:///" + path));
+  models.set(path, model);
+  model.onDidChangeContent(() => { markDirty(path, true); renderTabs(); });
+  model.updateOptions({ tabSize: 2 });
+  tabs.push({ path, dirty: false });
+  activateTab(path);
+}
+
+function activateTab(path) {
+  activePath = path;
+  const model = models.get(path);
+  if (editor && model) editor.setModel(model);
+  $("#stPath").textContent = path;
+  $("#stLang").textContent = langOf(path) === "plaintext" ? "" : langOf(path);
+  renderTabs();
+  document.querySelectorAll(".tree-item").forEach((el) =>
+    el.classList.toggle("active", el.dataset.path === path));
+}
+
+function closeTab(path) {
+  if (!tabs.find(t => t.path === path)) return;
+  const t = tabs.find(t => t.path === path);
+  if (t.dirty && !confirm(`${path} has unsaved changes — close anyway?`)) return;
+  tabs = tabs.filter(x => x.path !== path);
+  models.get(path)?.dispose();
+  models.delete(path);
+  if (activePath === path) activateTab(tabs.length ? tabs[tabs.length-1].path : null);
+  if (!activePath) { if (editor) editor.setModel(null); $("#stPath").textContent = "no file"; $("#stLang").textContent = ""; }
+  renderTabs();
+}
+
+function markDirty(path, d) { const t = tabs.find(t => t.path === path); if (t) t.dirty = d; }
+function renderTabs() {
+  const el = $("#tabs");
+  el.innerHTML = "";
+  for (const t of tabs) {
+    const tab = document.createElement("div");
+    tab.className = "tab" + (t.path === activePath ? " active" : "");
+    tab.innerHTML = `<span>${esc(t.path.split("/").pop())}</span>${t.dirty ? '<span class="dirty" title="unsaved"></span>' : ""}<button class="close" title="close">✕</button>`;
+    tab.addEventListener("click", (e) => { if (e.target.tagName !== "BUTTON") activateTab(t.path); });
+    tab.querySelector(".close").addEventListener("click", () => closeTab(t.path));
+    el.appendChild(tab);
+  }
+}
+
+async function saveActive() {
+  if (!activePath) return;
+  const model = models.get(activePath);
+  if (!model) return;
+  const r = await API("/api/file", { method: "POST", body: JSON.stringify({ path: activePath, content: model.getValue() }) });
+  const d = await r.json();
+  if (d.error) { addNote("✗ " + d.error, "errline"); return; }
+  markDirty(activePath, false);
+  renderTabs();
+}
+
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); saveActive(); }
+});
+
+/* ================= file tree ================= */
+function esc(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
+
+async function loadTree() {
+  const r = await API("/api/tree");
+  const d = await r.json();
+  const el = $("#tree");
+  el.innerHTML = "";
+  el.appendChild(renderNodes(d.tree || [], 0));
+}
+function renderNodes(nodes, depth) {
+  const frag = document.createDocumentFragment();
+  for (const n of nodes) {
+    const item = document.createElement("div");
+    item.className = "tree-item";
+    item.dataset.path = n.path;
+    item.innerHTML = `<span class="ico">${n.dir ? "📁" : fileIcon(n.name)}</span><span class="name">${esc(n.name)}</span>`;
+    item.addEventListener("click", () => {
+      if (n.dir) {
+        const ch = item.querySelector(".tree-children");
+        if (ch) ch.classList.toggle("collapsed");
+      } else openFile(n.path);
+    });
+    if (n.dir && n.children?.length && depth < 2) {
+      const ch = document.createElement("div");
+      ch.className = "tree-children";
+      ch.appendChild(renderNodes(n.children, depth + 1));
+      item.appendChild(ch);
+    } else if (n.dir) {
+      item.addEventListener("click", async () => {
+        if (item.querySelector(".tree-children")) return;
+        // lazy expand on first open (tree came pre-truncated)
+        const r = await API(`/api/tree`);
+        void r;
+      });
+    }
+    frag.appendChild(item);
+  }
+  return frag;
+}
+function fileIcon(name) {
+  const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
+  const icons = { ".ts":"🟦",".tsx":"🟦",".js":"🟨",".jsx":"🟨",".json":"🔧",".md":"📝",".py":"🐍",
+    ".html":"🌐",".css":"🎨",".rs":"🦀",".go":"🐹",".sh":"💻",".yml":"⚙️",".yaml":"⚙️",".toml":"⚙️",".lock":"🔒" };
+  return icons[ext] || "📄";
+}
+$("#refreshTree").addEventListener("click", loadTree);
+
+/* ================= chat / agent ================= */
+const chatScroll = $("#chatScroll");
+const chatInput = $("#chatInput");
+let busy = false, currentAsst = null, currentPlan = null, toolRows = new Map();
+
+marked.setOptions({ breaks: false, gfm: true });
+function mdRender(t) { return marked.parse(t, { async: false }); }
+
+function stick() { chatScroll.scrollTop = chatScroll.scrollHeight; }
+function killWelcome() { const w = $("#chatWelcome"); if (w) w.remove(); }
+function el(html) { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstChild; }
+
+function addUser(text) {
+  killWelcome(); closeAsst();
+  chatScroll.appendChild(el(`<div class="msg-user"><span class="who">you</span><div class="bubble">${esc(text)}</div></div>`));
+  stick();
+}
+function ensureAsst() {
+  if (currentAsst) return currentAsst;
+  const wrap = el(`<div class="msg-asst"><div class="md"></div></div>`);
+  chatScroll.appendChild(wrap);
+  currentAsst = { el: wrap, md: wrap.firstChild, raw: "" };
+  return currentAsst;
+}
+function closeAsst() { if (currentAsst) { currentAsst.el.classList.remove("streaming"); currentAsst = null; } }
+function appendAsst(txt) {
+  killWelcome();
+  const a = ensureAsst();
+  a.raw += txt; a.md.innerHTML = mdRender(a.raw);
+  a.el.classList.add("streaming");
+  stick();
+}
+function addNote(text, cls) { killWelcome(); closeAsst(); chatScroll.appendChild(el(`<div class="${cls || "note"}">${esc(text)}</div>`)); stick(); }
+
+function toolRow(name, args) {
+  killWelcome(); closeAsst();
+  const argStr = String(args.path ?? args.command ?? args.pattern ?? args.query ?? args.url ?? args.prompt ?? JSON.stringify(args)).slice(0, 120);
+  const row = el(`<div class="tool-row run"><div class="head"><span class="bullet"></span><span class="name">${esc(name)}</span><span class="arg">${esc(argStr)}</span><span class="state">running…</span></div><div class="body"></div></div>`);
+  row.querySelector(".head").addEventListener("click", () => row.classList.toggle("open"));
+  chatScroll.appendChild(row); stick();
+  return row;
+}
+function toolDone(row, result, ok) {
+  row.classList.remove("run"); row.classList.add(ok ? "ok" : "err");
+  row.querySelector(".state").textContent = ok ? "done" : "failed";
+  row.querySelector(".body").textContent = result || "";
+  // edits surface in the editor
+  if (ok && ["write", "edit", "multiedit"].includes(row._tool)) loadTree();
+}
+function renderPlan(todos) {
+  if (currentPlan) currentPlan.remove();
+  currentPlan = el(`<div class="plan"><div class="t">Plan · ${todos.filter(t=>t.status==="completed").length}/${todos.length}</div><div class="rows"></div></div>`);
+  currentPlan.querySelector(".rows").innerHTML = todos.map(t =>
+    `<div class="row"><span class="st ${t.status==="completed"?"done":t.status==="in_progress"?"prog":"pend"}">${t.status==="completed"?"✔":t.status==="in_progress"?"▸":"○"}</span><span class="${t.status}">${esc(t.status==="in_progress"?t.activeForm:t.content)}</span></div>`).join("");
+  chatScroll.appendChild(currentPlan); stick();
+}
+
+let thinkEl = null;
+function setBusy(b) {
+  busy = b;
+  $("#busyDot").classList.toggle("busy", b);
+  $("#statusTxt").textContent = b ? "working…" : "ready";
+  const sb = $("#chatSend");
+  sb.classList.toggle("stop", b);
+  sb.textContent = b ? "■" : "↑";
+  if (b && !thinkEl) { thinkEl = el(`<div class="think"><span class="spin">✳</span><span>thinking</span></div>`); chatScroll.appendChild(thinkEl); stick(); }
+  if (!b && thinkEl) { thinkEl.remove(); thinkEl = null; }
+}
+
+function showPerm(p) {
+  killWelcome(); closeAsst();
+  const a = p.args || {};
+  const detail = String(a.command ?? a.path ?? a.url ?? JSON.stringify(a)).slice(0, 500);
+  const card = el(`<div class="perm">
+    <h4>Allow <span>${esc(p.tool)}</span>?</h4>
+    <div class="cmd">${esc(detail)}</div>
+    <div class="btns"><button class="btn danger deny">Deny</button><button class="btn primary allow">Allow</button></div>
+  </div>`);
+  card.querySelector(".allow").onclick = () => { card.remove(); API("/api/action", { method: "POST", body: JSON.stringify({ action: "permission", id: p.id, allow: true }) }); };
+  card.querySelector(".deny").onclick = () => { card.remove(); API("/api/action", { method: "POST", body: JSON.stringify({ action: "permission", id: p.id, allow: false }) }); };
+  chatScroll.appendChild(card); stick();
+}
+
+function applyState(s) {
+  $("#modeSel").value = s.mode || "default";
+  $("#costPill").textContent = (s.cost != null ? "$" + (s.cost < .01 ? s.cost.toFixed(4) : s.cost.toFixed(2)) : "—") + " · " + Math.round((s.contextTokens||0)/100)/10 + "k tok";
+  $("#stVersion").textContent = "v" + s.version;
+  $("#chatSub").textContent = `${s.model}`;
+  setBusy(!!s.busy);
+}
+
+/* SSE */
+function connect() {
+  const es = new EventSource(`/api/events?token=${TOKEN}`);
+  es.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    switch (m.kind) {
+      case "hello": applyState(m.state); break;
+      case "state": applyState(m); break;
+      case "user": addUser(m.text); break;
+      case "agent": {
+        const ev = m.ev;
+        if (ev.kind === "text") appendAsst(ev.text);
+        else if (ev.kind === "tool_start") { const row = toolRow(ev.tool, ev.args || {}); row._tool = ev.tool; toolRows.set(ev.callId ?? toolRows.size, row); }
+        else if (ev.kind === "tool_end") { const row = [...toolRows.values()].pop(); if (row) toolDone(row, ev.result, ev.ok); }
+        else if (ev.kind === "todo") renderPlan(ev.todos);
+        else if (ev.kind === "retry") addNote(`↻ retrying in ${(ev.waitMs/1000).toFixed(1)}s — ${ev.reason}`, "retryline");
+        else if (ev.kind === "done") closeAsst();
+        break;
+      }
+      case "permission": showPerm(m); break;
+      case "error": addNote("✗ " + m.text, "errline"); break;
+    }
+  };
+  es.onerror = () => { /* EventSource auto-reconnects */ };
+}
+
+/* composer */
+chatInput.addEventListener("input", () => { chatInput.style.height = "auto"; chatInput.style.height = Math.min(chatInput.scrollHeight, 160) + "px"; });
+chatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+$("#chatSend").addEventListener("click", () => { busy ? API("/api/action", { method: "POST", body: JSON.stringify({ action: "stop" }) }) : sendChat(); });
+function sendChat() {
+  const v = chatInput.value.trim();
+  if (!v || busy) return;
+  chatInput.value = ""; chatInput.style.height = "auto";
+  API("/api/action", { method: "POST", body: JSON.stringify({ action: "prompt", text: v }) });
+}
+$("#modeSel").addEventListener("change", (e) => API("/api/action", { method: "POST", body: JSON.stringify({ action: "mode", mode: e.target.value }) }));
+
+async function loadModels() {
+  try {
+    const r = await API("/api/state");
+    const d = await r.json();
+    const sel = $("#modelSel");
+    sel.innerHTML = `<option>${esc(d.model || "—")}</option>`;
+    if (d.sessions) { /* future: session switcher */ }
+  } catch { /* ignore */ }
+}
+
+connect(); loadTree(); loadModels();
+</script>
+</body>
+</html>

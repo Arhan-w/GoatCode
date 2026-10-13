@@ -94,6 +94,13 @@ async function main(): Promise<number> {
 
   const sub = argv[0];
 
+  // goat ide [--port N] [--no-open] — the GoatCode IDE (Monaco + embedded agent)
+  if (sub === "ide" || sub === "web") {
+    const { runIde } = await import("./ide/server.ts");
+    await runIde({ port: flag("--port") ? Number(flag("--port")) : undefined, open: !has("--no-open") });
+    return 0;
+  }
+
   // goat self-update [--check] — swap the running binary for the latest release
   if (sub === "self-update" || sub === "update") {
     if (has("--check")) {

@@ -45,6 +45,7 @@
     "ink-text-input": "^6.0.0",
     "marked": "^18.0.12",
     "marked-terminal": "^7.3.0",
+    "monaco-editor": "0.52.2",
     "react": "^19.2.8",
     "react-devtools-core": "^7.0.1",
     "tree-sitter-wasms": "^0.1.13",
