@@ -231,9 +231,9 @@ export class Doctor {
     for (const [name, server] of Object.entries(mcpServers) as Array<[string, import("./types.ts").McpServerConfig]>) {
       try {
         let url: string;
-        if (server.url) {
+        if ("url" in server && server.url) {
           url = server.url;
-        } else if (server.command) {
+        } else if ("command" in server && server.command) {
           // Stdio server - just check config validity
           reachable++;
           continue;

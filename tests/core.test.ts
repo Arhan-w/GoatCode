@@ -905,7 +905,7 @@ describe("slash extras", () => {
     const { Session } = await import("../src/session.ts");
     const s = Session.new(home, "mock/m");
     const out: string[] = [];
-    expect(runSlash("/rename demo title", mkIo(s, out) as any)).toBe(true);
+    expect(await runSlash("/rename demo title", mkIo(s, out) as any)).toBe(true);
     expect(s.title).toBe("demo title");
   });
 
@@ -917,9 +917,9 @@ describe("slash extras", () => {
     s.append({ role: "user", content: "hi" });
     s.append({ role: "assistant", content: "yo" });
     const out: string[] = [];
-    expect(runSlash("/usage", mkIo(s, out) as any)).toBe(true);
+    expect(await runSlash("/usage", mkIo(s, out) as any)).toBe(true);
     expect(out.join(" ")).toContain("1,234");
-    expect(runSlash("/status", mkIo(s, out) as any)).toBe(true);
+    expect(await runSlash("/status", mkIo(s, out) as any)).toBe(true);
     expect(out.join(" ")).toContain("mock/m");
   });
 
@@ -929,7 +929,7 @@ describe("slash extras", () => {
     writeFileSync(join(home, "GOAT.md"), "- use bun, not npm\n");
     const s = Session.new(home, "mock/m");
     const out: string[] = [];
-    expect(runSlash("/memory", mkIo(s, out) as any)).toBe(true);
+    expect(await runSlash("/memory", mkIo(s, out) as any)).toBe(true);
     expect(out.join(" ")).toContain("use bun, not npm");
   });
 
@@ -1098,7 +1098,7 @@ describe("subagents", () => {
     const root = mkdtempSync(join(tmpdir(), "goat-clone-"));
     const tk = new ToolKit(root, { autoApprove: true });
     await tk.dispatch("write", { path: "parent.txt", content: "parent" });
-    tk.plan([{ content: "parent task", activeForm: "parenting", status: "in_progress" }]);
+    await tk.dispatch("todo", { todos: [{ content: "parent task", activeForm: "parenting", status: "in_progress" }] });
 
     const child = tk.clone();
     expect(child.root).toBe(tk.root);
@@ -1125,9 +1125,15 @@ describe("subagents", () => {
     const { ToolKit } = await import("../src/tools.ts");
     let calls = 0;
     const client = {
-      async *streamChat(_msgs: any[]) {
+      async *streamChat(msgs: any[]) {
         calls++;
-        yield { textDelta: "done" };
+        const isChild = msgs.some((m: any) => String(m.content).includes("SUBTASK"));
+        if (!isChild) {
+          if (calls === 1) yield { toolCalls: [{ id: "t1", name: "task", arguments: { description: "x", prompt: "SUBTASK: y" } }] };
+          else yield { textDelta: "done" };
+        } else {
+          yield { textDelta: "child done" };
+        }
       },
     } as any;
     const session = Session.new(home, "mock/m");
@@ -1135,7 +1141,7 @@ describe("subagents", () => {
       client, session, tools: new ToolKit(home, { autoApprove: true }),
       maxTokens: 10, temperature: null, maxSteps: 3,
     });
-    for await (const _ of agent.runTurn("task {\"description\":\"x\",\"prompt\":\"y\"}")) void _;
+    for await (const _ of agent.runTurn("go")) void _;
     expect(calls).toBeGreaterThanOrEqual(1);
     expect(session.subagentForks.length).toBe(1);
     expect(session.subagentForks[0].description).toBe("x");
@@ -1604,7 +1610,7 @@ describe("compact command", () => {
       setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub", reloadPlugins: () => 0,
       clearAuthBanner: () => {},
     };
-    expect(runSlash("/compact", io)).toBe(true);
+    expect(await runSlash("/compact", io)).toBe(true);
     expect(s.compactedFrom).toBe(0); // delegated — the stub doesn't mutate
   });
 

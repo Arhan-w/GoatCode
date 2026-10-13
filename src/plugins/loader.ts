@@ -103,7 +103,7 @@ export async function executeSandboxedPlugin(
     writeFileSync(argsFile, JSON.stringify(args), "utf8");
   } catch { /* best effort */ }
 
-  const result = await createSandbox({
+  const result = await executeSandbox({
     entryPoint,
     workDir: plugin.dir,
     env: { GOAT_PLUGIN_ARGS_FILE: argsFile },

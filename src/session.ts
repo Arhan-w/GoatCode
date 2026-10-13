@@ -1,12 +1,11 @@
 /**
  * JSONL session persistence: ~/.goatcode/sessions/<id>.jsonl
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appDir } from "./config.ts";
 import type { Message, ToolCall } from "./llm.ts";
 import { textOf } from "./llm.ts";
-import { SessionError } from "./errors.ts";
 
 export interface SubagentFork {
   childId: string;
@@ -90,10 +89,10 @@ export class Session {
   /** Tool state snapshots for crash recovery. */
   toolState: { snapshots: SnapRecord[]; completedTurns: number } = { snapshots: [], completedTurns: 0 };
 
-  // Append-only save thresholds
-  private _saveCount = 0;
-  private static readonly COMPACT_THRESHOLD = 500; // messages
-  private static readonly COMPACT_SIZE_THRESHOLD = 1_000_000; // bytes
+  /** Compaction hints: message-count and file-size thresholds above which
+   *  /compact should fold older turns. */
+  static readonly COMPACT_THRESHOLD = 500; // messages
+  static readonly COMPACT_SIZE_THRESHOLD = 1_000_000; // bytes
 
   constructor(init: Partial<SessionData> & { id: string; cwd: string; model: string }) {
     this.id = init.id;
@@ -173,155 +172,72 @@ export class Session {
     this.messages.push(msg);
   }
 
-  /** Append-only save: write new messages as JSONL, compact periodically */
-  async save(): Promise<void> {
-    if (this.messages.length === 0) return;
-
+  /** Atomic full-file save: meta header line + one JSON line per message.
+   *  Synchronous and atomic (tmp + rename) so a crash mid-write can never
+   *  truncate a session, and callers never have to remember to await. */
+  save(): void {
     const dir = sessionsDir();
-    mkdirSync(dir, { recursive: true });
     const path = this.path();
-
-    // Determine which messages to write (everything after compactedFrom)
-    const messagesToWrite = this.messages.slice(this.compactedFrom);
-    if (messagesToWrite.length === 0) return;
-
-    // Append JSONL with version header
-    const header = JSON.stringify({
-      version: 'jsonl',
-      id: this.id,
-      title: this.title,
-      model: this.model,
-      createdAt: this.createdAt,
-      usage: this.usage,
-      turnMarks: this.turnMarks,
-      subagentForks: this.subagentForks,
-      crashRecoveryMarker: this.crashRecoveryMarker,
-      toolState: this.toolState,
-      compactedFrom: this.compactedFrom
-    });
-    const body = messagesToWrite.map((m) => JSON.stringify(m)).join('\n') + '\n';
-    await Bun.file(path, { create: true, open: 'a' }).write(header + '\n' + body);
-
-    this._saveCount++;
-
-    // Compact if needed
-    if (await this.shouldCompact()) {
-      await this.compact();
-    }
-  }
-
-  private async shouldCompact(): Promise<boolean> {
-    const remaining = this.messages.length - this.compactedFrom;
-    if (remaining >= Session.COMPACT_THRESHOLD) return true;
-
-    // Check file size
+    const tmp = `${path}.tmp`;
+    const lines = [
+      JSON.stringify({
+        version: "jsonl",
+        id: this.id,
+        cwd: this.cwd,
+        model: this.model,
+        title: this.title,
+        createdAt: this.createdAt,
+        usage: this.usage,
+        turnMarks: this.turnMarks,
+        subagentForks: this.subagentForks,
+        crashRecoveryMarker: this.crashRecoveryMarker,
+        toolState: this.toolState,
+        compactedFrom: this.compactedFrom,
+      }),
+      ...this.messages.map((m) => JSON.stringify(m)),
+    ];
+    writeFileSync(tmp, lines.join("\n") + "\n", "utf8");
     try {
-      const stats = await Bun.file(this.path()).stat();
-      return stats.size > Session.COMPACT_SIZE_THRESHOLD;
+      renameSync(tmp, path);
     } catch {
-      return false;
+      // rename can fail across some filesystems — fall back to direct write
+      writeFileSync(path, lines.join("\n") + "\n", "utf8");
+      try { unlinkSync(tmp); } catch { /* tmp cleanup best-effort */ }
     }
   }
 
-  /** Rewrite full session as single JSON (compacted) */
-  async compact(): Promise<void> {
-    if (this.messages.length <= this.compactedFrom) return;
-
-    // Summarize old messages
-    const oldMessages = this.messages.slice(0, this.compactedFrom);
-    const digest = oldMessages.length > 0 ? await summarize(oldMessages) : '';
-
-    // Write compacted form
-    const data = {
-      id: this.id,
-      cwd: this.cwd,
-      model: this.model,
-      title: this.title,
-      createdAt: this.createdAt,
-      usage: this.usage,
-      turnMarks: this.turnMarks,
-      messages: this.messages.slice(this.compactedFrom),
-      compactedFrom: 0,
-      digest,
-      compactedAt: Date.now()
-    };
-
-    const dir = sessionsDir();
-    mkdirSync(dir, { recursive: true });
-    await Bun.file(this.path()).write(JSON.stringify(data) + '\n');
-
-    this.compactedFrom = 0;
-    this._saveCount = 0;
-  }
-
-  /** Load handles both JSONL and compact formats */
-  async load(): Promise<void> {
-    const path = this.path();
+  /** Load: read the meta header + message lines. Tolerates the legacy
+   *  {meta:true} format and bare message-only files. */
+  load(): void {
     try {
-      const content = await Bun.file(path).text();
-      const lines = content.trim().split('\n').filter(Boolean);
-
-      // Try compact JSON format first (header line starts with { and no version field, or has compactedFrom at top)
-      try {
-        const data = JSON.parse(lines[0]);
-        if (data.messages && Array.isArray(data.messages) && !data.version) {
-          this.messages = data.messages;
-          this.compactedFrom = data.compactedFrom ?? 0;
-          this.digest = data.digest ?? '';
-          this.title = data.title ?? this.title;
-          this.model = data.model ?? this.model;
-          this.createdAt = data.createdAt ?? this.createdAt;
-          if (data.usage) this.usage = data.usage;
-          if (data.turnMarks) this.turnMarks = data.turnMarks;
-          if (data.subagentForks) this.subagentForks = data.subagentForks;
-          return;
-        }
-      } catch {
-        // Not compact JSON, try JSONL
+      const content = readFileSync(this.path(), "utf8");
+      const lines = content.split("\n").filter(Boolean);
+      if (!lines.length) return;
+      let header: any = null;
+      try { header = JSON.parse(lines[0]); } catch { /* legacy message-only file */ }
+      // meta line: either {version:"jsonl"} (current) or {meta:true} (legacy)
+      if (header && (header.version === "jsonl" || header.meta === true)) {
+        this.cwd = header.cwd ?? this.cwd;
+        this.model = header.model ?? this.model;
+        this.title = header.title ?? this.title;
+        this.createdAt = header.createdAt ?? this.createdAt;
+        this.compactedFrom = header.compactedFrom ?? 0;
+        if (header.usage) this.usage = { cacheRead: 0, cacheWrite: 0, ...header.usage };
+        this.digest = header.digest ?? "";
+        this.turnMarks = Array.isArray(header.turnMarks) ? header.turnMarks : [];
+        if (Array.isArray(header.subagentForks)) this.subagentForks = header.subagentForks;
+        if (header.crashRecoveryMarker) this.crashRecoveryMarker = header.crashRecoveryMarker;
+        if (header.toolState) this.toolState = header.toolState;
+        this.messages = lines.slice(1).map((l) => JSON.parse(l) as Message);
+        return;
       }
-
-      // JSONL format: first line is version header
-      try {
-        const header = JSON.parse(lines[0]);
-        if (header.version === 'jsonl') {
-          this.messages = lines.slice(1).map(l => JSON.parse(l));
-          this.compactedFrom = header.compactedFrom ?? 0;
-          this.digest = header.digest ?? '';
-          this.title = header.title ?? this.title;
-          this.model = header.model ?? this.model;
-          this.createdAt = header.createdAt ?? this.createdAt;
-          if (header.usage) this.usage = header.usage;
-          if (Array.isArray(header.turnMarks)) this.turnMarks = header.turnMarks;
-          if (Array.isArray(header.subagentForks)) this.subagentForks = header.subagentForks;
-          if (header.crashRecoveryMarker) this.crashRecoveryMarker = header.crashRecoveryMarker;
-          if (header.toolState) this.toolState = header.toolState;
-          return;
-        }
-        // If header is not jsonl version, treat as compact JSON fallback
-        if (header.messages && Array.isArray(header.messages)) {
-          this.messages = header.messages;
-          this.compactedFrom = header.compactedFrom ?? 0;
-          this.digest = header.digest ?? '';
-          this.title = header.title ?? this.title;
-          this.model = header.model ?? this.model;
-          this.createdAt = header.createdAt ?? this.createdAt;
-          if (header.usage) this.usage = header.usage;
-          if (header.turnMarks) this.turnMarks = header.turnMarks;
-          if (header.subagentForks) this.subagentForks = header.subagentForks;
-          return;
-        }
-      } catch {
-        // Not JSONL either
-      }
-
-      // Legacy: all lines are messages (no version header at all)
-      this.messages = lines.map(l => JSON.parse(l));
+      // Legacy: every line is a message, no header
+      this.messages = lines.map((l) => JSON.parse(l) as Message);
       this.compactedFrom = 0;
     } catch {
-      // File doesn't exist or is corrupt - keep existing state
+      // missing or corrupt session — keep in-memory state
     }
   }
-
   /** The window sent to the provider: everything after the compaction cut. */
   context(): Message[] {
     return this.messages.slice(this.compactedFrom);

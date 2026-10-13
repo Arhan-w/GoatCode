@@ -8,7 +8,6 @@
  * All yield the same StreamEvent shape so the agent loop is model-agnostic.
  */
 
-import { SSE_MIN_CHUNK_CHARS, SSE_MAX_LATENCY_MS } from "./constants.ts";
 import { PROVIDER_RATE_LIMITS } from "./providers.ts";
 import { GOATED_FLASH_ID } from "./gflash.ts";
 import { TokenBucketRateLimiter, RateLimiterRegistry, type RateLimiterConfig } from "./rate-limiter.ts";
@@ -145,78 +144,30 @@ export interface ChatClient {
 
 // ---------- SSE plumbing ----------
 
-async function* sseLines(
-  response: Response,
-  options?: { minChunkSize?: number; maxLatencyMs?: number }
-): AsyncGenerator<string> {
-  const minChunk = options?.minChunkSize ?? SSE_MIN_CHUNK_CHARS;
-  const maxLatency = options?.maxLatencyMs ?? SSE_MAX_LATENCY_MS;
-
-  let buffer = "";
-  let lastFlush = Date.now();
-  let flushTimer: ReturnType<typeof setTimeout> | null = null;
-  let flushPromise: Promise<void> | null = null;
-  let flushResolve: (() => void) | null = null;
-
-  const scheduleFlush = () => {
-    if (flushTimer) clearTimeout(flushTimer);
-    flushPromise = new Promise(resolve => { flushResolve = resolve; });
-    flushTimer = setTimeout(() => { flushResolve?.(); }, maxLatency);
-  };
-
-  async function* flushGen(): AsyncGenerator<string, void> {
-    if (buffer.length > 0) {
-      yield buffer;
-      buffer = "";
-    }
-    flushResolve?.();
-    flushResolve = null;
-    flushPromise = null;
-  }
-
+/** Split an SSE response body into `data:` payload lines. Line-based and
+ *  backpressure-safe: never buffers whole events past their newline, so a
+ *  provider that streams slowly still delivers deltas immediately and a
+ *  provider that closes early can never wedge the reader. */
+async function* sseLines(response: Response): AsyncGenerator<string> {
   const reader = response.body?.getReader();
   if (!reader) return;
-
+  const decoder = new TextDecoder();
+  let buf = "";
   try {
-    while (true) {
+    for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-
-      const chunk = new TextDecoder().decode(value);
-      buffer += chunk;
-
-      // Emit complete lines as they arrive (for tool_calls, usage events)
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        // For non-text events, emit immediately
-        if (!trimmed.startsWith("data: ") || trimmed.includes("tool_calls") || trimmed.includes("usage")) {
-          yield trimmed.slice(6); // strip 'data: '
-          continue;
-        }
-
-        // Buffer text deltas
-        buffer += "\n" + trimmed;
-        scheduleFlush();
-
-        // Emit if buffer is large enough
-        if (buffer.length >= minChunk) {
-          await flushGen().next();
-        }
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).replace(/\r$/, "");
+        buf = buf.slice(idx + 1);
+        if (line.startsWith("data:")) yield line.slice(5).trim();
       }
     }
-
-    // Final flush
-    if (buffer.length > 0) {
-      yield buffer;
-    }
+    buf += decoder.decode();
+    if (buf.startsWith("data:")) yield buf.slice(5).trim();
   } finally {
-    if (flushTimer) clearTimeout(flushTimer);
-    await flushPromise ?? Promise.resolve();
     reader.releaseLock();
   }
 }
@@ -310,7 +261,7 @@ export class OpenAIChatClient implements ChatClient {
 
     const res = await postJson(`${this.baseUrl}/chat/completions`, this.headers(), payload, opts.signal);
     const partial = new Map<number, { id: string; name: string; args: string }>();
-    for await (const data of sseLines(res, { minChunkSize: 16, maxLatencyMs: 50 })) {
+    for await (const data of sseLines(res)) {
       if (data === "[DONE]") break;
       const obj = safeParse(data);
       if (!obj) continue;
@@ -430,7 +381,7 @@ export class AnthropicClient implements ChatClient {
     const toolBuf = new Map<number, { id: string; name: string; json: string }>();
     const cacheTok = { read: 0, write: 0 };
     let blockType = "";
-    for await (const data of sseLines(res, { minChunkSize: 16, maxLatencyMs: 50 })) {
+    for await (const data of sseLines(res)) {
       const obj = safeParse(data);
       if (!obj) continue;
       switch (obj.type) {
@@ -544,7 +495,7 @@ export class OpenAIResponsesClient implements ChatClient {
 
     const res = await postJson(`${this.baseUrl}/responses`, this.headers(), payload, opts.signal);
     const calls = new Map<string, { id: string; name: string; args: string }>();
-    for await (const data of sseLines(res, { minChunkSize: 16, maxLatencyMs: 50 })) {
+    for await (const data of sseLines(res)) {
       const obj = safeParse(data);
       if (!obj) continue;
       const type = obj.type ?? "";
@@ -674,7 +625,7 @@ export class GeminiClient implements ChatClient {
     }
     const res = await postJson(url, this.headers(), payload, opts.signal);
     const calls: ToolCall[] = [];
-    for await (const data of sseLines(res, { minChunkSize: 16, maxLatencyMs: 50 })) {
+    for await (const data of sseLines(res)) {
       const obj = safeParse(data);
       if (!obj) continue;
       const inner = obj.request?.response ? obj : { response: obj };
