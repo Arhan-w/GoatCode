@@ -34,6 +34,7 @@ import { costUsd } from "../pricing.ts";
 import { VERSION, WEB_DEFAULT_PORT } from "../constants.ts";
 import { buildUserContent } from "../refs.ts";
 import { insideRoot, SKIP_DIRS } from "../tools.ts";
+import { loadCustomAgents, agentDirs } from "../agents/loader.ts";
 
 interface PermReq { tool: string; args: Record<string, unknown>; resolve: (ok: boolean) => void }
 
@@ -128,6 +129,7 @@ export async function runIde(opts: IdeOpts = {}): Promise<void> {
       cache: cfg.cachePrompts,
       extraSystem: [buildExtraSystem(allSkills(cfg), root, resolveRepos(cfg.repos, root)),
         loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
+      customAgents: loadCustomAgents(...agentDirs(root)),
     });
   }
 
@@ -203,6 +205,7 @@ export async function runIde(opts: IdeOpts = {}): Promise<void> {
         if (ev.kind === "text") broadcast({ kind: "agent", ev });
         else if (ev.kind === "thinking") broadcast({ kind: "agent", ev });
         else if (ev.kind === "tool_start") broadcast({ kind: "agent", ev });
+        else if (ev.kind === "tool_output") broadcast({ kind: "agent", ev });
         else if (ev.kind === "tool_end") { broadcast({ kind: "agent", ev }); broadcastState(); }
         else if (ev.kind === "todo") broadcast({ kind: "agent", ev });
         else if (ev.kind === "usage") broadcast({ kind: "agent", ev });
@@ -252,13 +255,14 @@ export async function runIde(opts: IdeOpts = {}): Promise<void> {
         join(import.meta.dir, "vendor", rel),
       ];
       let body: Buffer | null = null;
+      let foundExt = "";
       for (const file of candidates) {
-        try { body = readFileSync(file); break; } catch { /* try next */ }
+        try { body = readFileSync(file); foundExt = extname(file); break; } catch { /* try next */ }
       }
       if (!body) return new Response("not found", { status: 404 });
       return new Response(new Uint8Array(body), {
         headers: {
-          "content-type": MIME[extname(candidates[0]).toLowerCase()] ?? "application/octet-stream",
+          "content-type": MIME[foundExt.toLowerCase()] ?? "application/octet-stream",
           "cache-control": "public, max-age=31536000, immutable",
         },
       });

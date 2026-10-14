@@ -141,6 +141,75 @@ describe("tools", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  test("dispatch emits toolEvent start/end telemetry", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-tel-"));
+    writeFileSync(join(root, "t.txt"), "data\n");
+    const tk = new ToolKit(root, { autoApprove: true });
+    const events: any[] = [];
+    tk.toolEvent = (ev) => events.push(ev);
+    await tk.dispatch("read", { path: "t.txt" });
+    expect(events.length).toBe(2);
+    expect(events[0].kind).toBe("start");
+    expect(events[0].tool).toBe("read");
+    expect(events[0].callId).toBeTruthy();
+    expect(events[1].kind).toBe("end");
+    expect(events[1].ok).toBe(true);
+    // a failing tool still emits end with ok:false
+    events.length = 0;
+    await tk.dispatch("read", { path: "missing.txt" });
+    expect(events[1].kind).toBe("end");
+    expect(events[1].ok).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("bash streams output deltas via toolEvent", async () => {
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-stream-"));
+    const tk = new ToolKit(root, { autoApprove: true });
+    const events: any[] = [];
+    tk.toolEvent = (ev) => events.push(ev);
+    const cmd = process.platform === "win32" ? "echo line-one & echo line-two" : "echo line-one; echo line-two";
+    const r = await tk.dispatch("bash", { command: cmd });
+    expect(r.ok).toBe(true);
+    const outs = events.filter((e) => e.kind === "output");
+    expect(outs.length).toBeGreaterThanOrEqual(1);
+    const merged = outs.map((e) => e.text).join("");
+    expect(merged).toContain("line-one");
+    // every delta carries a callId matching its start
+    const start = events.find((e) => e.kind === "start");
+    for (const o of outs) expect(o.callId).toBe(start.callId);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("agent forwards tool_output events from streaming bash", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const root = mkdtempSync(join(tmpdir(), "goat-agent-stream-"));
+    let parentCalls = 0;
+    const client = {
+      async *streamChat(_msgs: any[]) {
+        parentCalls++;
+        if (parentCalls === 1)
+          yield { toolCalls: [{ id: "b1", name: "bash", arguments: { command: process.platform === "win32" ? "echo stream-me" : "echo stream-me" } }] };
+        else yield { textDelta: "done" };
+      },
+    } as any;
+    const session = Session.new(root, "mock/m");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(root, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 3,
+    });
+    const kinds: string[] = [];
+    for await (const ev of agent.runTurn("stream it")) {
+      kinds.push(ev.kind === "tool_output" ? `output:${(ev as any).text.trim()}` : ev.kind);
+    }
+    expect(kinds).toContain("tool_start");
+    expect(kinds.some((k) => k.startsWith("output:") && k.includes("stream-me"))).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
   test("edit requires unique match", async () => {
     const { ToolKit } = await import("../src/tools.ts");
     const root = mkdtempSync(join(tmpdir(), "goat-root-"));
@@ -962,6 +1031,7 @@ describe("slash extras", () => {
     setCfg: () => {}, registry: { get: () => undefined, resolveCredential: () => null } as any,
     setSession: () => {}, saveCfg: () => {},
     exit: () => {}, mcp: null, skills: [], undoTurn: () => 0, backgroundTasks: () => [],
+    rewindTurn: () => null, sessionRules: () => [], sessionSnaps: () => [], customAgents: () => [],
     setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub", reloadPlugins: () => 0,
   });
 
@@ -972,6 +1042,37 @@ describe("slash extras", () => {
     const out: string[] = [];
     expect(await runSlash("/rename demo title", mkIo(s, out) as any)).toBe(true);
     expect(s.title).toBe("demo title");
+  });
+
+  test("/diff summarizes session file changes per file", async () => {
+    const { runSlash } = await import("../src/commands.tsx");
+    const { Session } = await import("../src/session.ts");
+    const s = Session.new(home, "mock/m");
+    const out: any[] = [];
+    const io = mkIo(s, out) as any;
+    io.sessionSnaps = () => [
+      { path: "a.ts", before: "const x = 1;\nconst y = 2;\n", after: "const x = 10;\nconst y = 2;\n" },
+      { path: "a.ts", before: "const x = 10;\nconst y = 2;\n", after: "const x = 10;\nconst y = 20;\n" },
+      { path: "new.md", before: "", after: "# hi\n" },
+    ];
+    expect(await runSlash("/diff", io)).toBe(true);
+    // JSON.stringify of nested children splits text/numbers — assert on content
+    const all = out.map((n) => (typeof n === "string" ? n : JSON.stringify(n))).join(" ");
+    expect(all).toContain("a.ts");
+    expect(all).toContain("new.md");
+    expect(all).toContain("Session changes");
+    expect(all).toContain("edits"); // per-file edit count rendered
+    // and the ops count is the number 2 (JSX children keep numbers unstringified)
+    expect(all).toMatch(/2,\\?" edits|2," edits/);
+  });
+
+  test("/diff with no changes says so", async () => {
+    const { runSlash } = await import("../src/commands.tsx");
+    const { Session } = await import("../src/session.ts");
+    const s = Session.new(home, "mock/m");
+    const out: string[] = [];
+    expect(await runSlash("/diff", mkIo(s, out) as any)).toBe(true);
+    expect(out.join(" ")).toContain("no file changes");
   });
 
   test("/usage and /status render without throwing", async () => {
@@ -1676,7 +1777,7 @@ describe("compact command", () => {
       cfg: { model: "mock/m", maxTokens: 8192, autoApprove: false } as any,
       setCfg: () => {}, registry: null as any, setSession: () => {}, saveCfg: () => {},
       exit: () => {}, mcp: null, skills: [], undoTurn: () => 0, backgroundTasks: () => [],
-      rewindTurn: () => null, sessionRules: () => [],
+      rewindTurn: () => null, sessionRules: () => [], sessionSnaps: () => [], customAgents: () => [],
       setMode: () => {}, runTurn: async () => {}, compactNow: async () => "stub", reloadPlugins: () => 0,
       clearAuthBanner: () => {},
     };

@@ -12,6 +12,7 @@ import { CredentialStore, OAUTH_PROVIDERS, type Credential } from "./providers.t
 import { Session, listSessions, allSessions, searchSessions } from "./session.ts";
 import { cacheSavings, costUsd, fmtUsd } from "./pricing.ts";
 import { contextWindow } from "./window.ts";
+import { unifiedDiff, diffStats } from "./diff.ts";
 import { contentChars, estimateTokens, textOf } from "./llm.ts";
 import { loginDevice, loginImport, loginOauth, type LoginIO } from "./oauth.ts";
 import { loadPlugins, pluginSkills } from "./plugins/loader.ts";
@@ -30,7 +31,7 @@ export const SLASH_COMMANDS = [
   "/mcp", "/skills", "/plugin", "/cost", "/usage", "/context", "/config",
   "/status", "/memory", "/doctor", "/init", "/review", "/ultraplan", "/undo", "/rewind", "/permissions", "/search", "/tasks", "/quit",
   "/peers", "/handoff", "/share", "/leave", "/index", "/find", "/marketplace",
-  "/recover", "/fork",
+  "/recover", "/fork", "/diff", "/agents",
 ];
 
 export interface SlashIO {
@@ -59,6 +60,10 @@ export interface SlashIO {
   compactNow(): Promise<string>;
   /** Re-scan plugin dirs; returns total active skills+commands. */
   reloadPlugins(): number;
+  /** Every file mutation captured this session (for /diff); empty = none. */
+  sessionSnaps(): Array<{ path: string; before: string; after: string }>;
+  /** Custom subagent definitions (for /agents). */
+  customAgents(): Array<{ name: string; description: string; tools?: string[] }>;
   /** Active collab session (Pillar B). */
   collab?: CollabSession | null;
 }
@@ -591,6 +596,72 @@ export async function runSlash(line: string, io: SlashIO): Promise<boolean> {
       return true;
     }
 
+    case "/diff": {
+      const snaps = io.sessionSnaps();
+      if (!snaps.length) { io.push(<Text dimColor color="#7c8390">  no file changes this session yet</Text>); return true; }
+      // collapse to the latest state per file, with +additions/-deletions
+      const perFile = new Map<string, { before: string; after: string; ops: number }>();
+      for (const s of snaps) {
+        const cur = perFile.get(s.path);
+        if (cur) { cur.after = s.after; cur.ops++; }
+        else perFile.set(s.path, { before: s.before, after: s.after, ops: 1 });
+      }
+      let adds = 0, dels = 0;
+      const rows: ReactNode[] = [];
+      for (const [path, f] of perFile) {
+        const stats = diffStats(unifiedDiff(f.before, f.after, 0));
+        adds += stats.added; dels += stats.removed;
+        const isNew = f.before === "";
+        rows.push(
+          <Text key={path}>
+            <Text color={isNew ? "#4ade80" : "#a855f7"}>{isNew ? "＋" : "±"}</Text>{" "}
+            <Text>{path}</Text>
+            <Text color="#4ade80"> +{stats.added}</Text>
+            <Text color="#f87171"> -{stats.removed}</Text>
+            {f.ops > 1 ? <Text dimColor color="#7c8390">  ({f.ops} edits)</Text> : null}
+          </Text>,
+        );
+      }
+      io.push(
+        <Box flexDirection="column">
+          <Text bold>Session changes — {perFile.size} file{perFile.size === 1 ? "" : "s"}</Text>
+          {rows}
+          <Text dimColor color="#7c8390">  total: <Text color="#4ade80">+{adds}</Text> / <Text color="#f87171">-{dels}</Text> lines · /undo to revert the last turn</Text>
+        </Box>,
+      );
+      return true;
+    }
+
+    case "/agents": {
+      const list = io.customAgents();
+      if (!list.length) {
+        io.push(
+          <Box flexDirection="column">
+            <Text dimColor color="#7c8390">  no custom subagents</Text>
+            <Text dimColor color="#7c8390">  add one: ~/.goatcode/agents/name.md with frontmatter:</Text>
+            <Text dimColor color="#7c8390">    ---</Text>
+            <Text dimColor color="#7c8390">    description: what this agent is for</Text>
+            <Text dimColor color="#7c8390">    tools: read, grep, glob, bash</Text>
+            <Text dimColor color="#7c8390">    ---</Text>
+            <Text dimColor color="#7c8390">    (markdown body = the agent's system prompt)</Text>
+          </Box>,
+        );
+        return true;
+      }
+      io.push(
+        <Box flexDirection="column">
+          <Text bold>Custom subagents — pass as task subagent_type</Text>
+          {list.map((a) => (
+            <Text key={a.name}>
+              <Text color="#a855f7">{a.name.padEnd(16)}</Text>
+              <Text dimColor color="#7c8390">  {a.description}{a.tools?.length ? ` · tools: ${a.tools.join(",")}` : " · all tools"}</Text>
+            </Text>
+          ))}
+        </Box>,
+      );
+      return true;
+    }
+
     case "/tasks": {
       const rows = io.backgroundTasks();
       if (!rows.length) { io.push(<Text dimColor color="#7c8390">  no background tasks</Text>); return true; }
@@ -818,6 +889,8 @@ export const COMMAND_DESC: Record<string, string> = {
   "/status": "session + provider status", "/memory": "show GOAT.md", "/rename": "rename the session",
   "/export": "save the conversation (md/html)", "/doctor": "diagnose install (live probe)",
   "/init": "create GOAT.md", "/review": "review a PR", "/undo": "revert last turn's file changes",
+  "/diff": "show every file change made this session (+/- lines per file)",
+  "/agents": "list custom subagents (task subagent_type values)",
   "/tasks": "list background bash tasks", "/ultraplan": "decompose into parallel scouts → unified plan",
   "/quit": "exit",
   "/rewind": "jump transcript + files back to a turn", "/search": "full-text search saved sessions",

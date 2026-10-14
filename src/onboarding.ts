@@ -1,11 +1,12 @@
 /**
- * First-run wizard for GoatCode v3.2.
+ * First-run wizard for GoatCode.
  *
  * Guides new users through provider selection, model choice,
  * and optional configuration on first launch.
  * Runs before the TUI starts (pure stdio, no Ink).
  */
 import { loadConfig, saveConfig, splitModel, type GoatConfig } from "./config.ts";
+import { VERSION } from "./constants.ts";
 import { join } from "node:path";
 import { existsSync, writeFileSync, mkdirSync } from "node:fs";
 
@@ -63,7 +64,7 @@ export async function runFirstRunWizard(): Promise<boolean> {
   console.log("\x1b[2J\x1b[H\x1b[3J");
   console.log("");
   console.log("  \x1b[35m████████████████████████████████\x1b[39m");
-  console.log("  \x1b[35m  Welcome to GoatCode v3.2  \x1b[39m");
+  console.log(`  \x1b[35m  Welcome to GoatCode v${VERSION}  \x1b[39m`);
   console.log("  \x1b[35m████████████████████████████████\x1b[39m");
   console.log("");
   console.log("  Every provider. One terminal. Agentic coding CLI.");
@@ -95,9 +96,9 @@ export async function runFirstRunWizard(): Promise<boolean> {
 
   // Step 4: Auth hint
   console.log("");
-  console.log("  Final step: make sure you have credentials for your provider.");
+  console.log(`  Final step: make sure you have credentials for your provider.`);
   console.log(`  Example: goat auth ${provider} --key YOUR_KEY_HERE`);
-  console.log("  Or use OAuth: goat auth ${provider} --oauth");
+  console.log(`  Or use OAuth: goat auth ${provider} --oauth`);
   console.log("");
   await prompt("Press Enter when ready to start: ");
 

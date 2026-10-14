@@ -1,5 +1,5 @@
 /**
- * GoatCode Doctor — comprehensive diagnostics for the GoatCode v3.2 platform.
+ * GoatCode Doctor — comprehensive diagnostics for the GoatCode platform.
  *
  * Run with: goat doctor          # show all check results
  *         goat doctor --fix      # auto-fixable issues
@@ -11,7 +11,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { appDir } from "./config.ts";
+import { appDir, type McpServerConfig } from "./config.ts";
 import { CredentialStore } from "./providers.ts";
 import { loadCatalog, type Provider } from "./providers.ts";
 import { OAUTH_PROVIDERS } from "./providers.ts";
@@ -114,7 +114,6 @@ export class Doctor {
         const url = `https://${p}.com/health`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3000);
-        const fetch = (await import("node:fetch")).default;
         await fetch(url, { method: "HEAD", signal: controller.signal });
         clearTimeout(timeoutId);
       } catch {
@@ -228,7 +227,7 @@ export class Doctor {
       };
     }
 
-    for (const [name, server] of Object.entries(mcpServers) as Array<[string, import("./types.ts").McpServerConfig]>) {
+    for (const [name, server] of Object.entries(mcpServers) as Array<[string, McpServerConfig]>) {
       try {
         let url: string;
         if ("url" in server && server.url) {
@@ -242,7 +241,6 @@ export class Doctor {
         }
 
         // Basic URL reachability check
-        const fetch = (await import("node:fetch")).default;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
         await fetch(url, { method: "HEAD", signal: controller.signal });
@@ -333,12 +331,11 @@ export class Doctor {
   private async checkVersion(): Promise<DiagnosticResult> {
     const { VERSION } = await import("./constants.ts");
     const pkg = await import("../package.json");
-    const current = (pkg.default?.version ?? VERSION).toString();
-    // The version from package.json takes precedence
-    const reported = current;
+    const reported = (pkg.default?.version ?? VERSION).toString();
 
-    // Verify the running version matches expected
-    const expected = "3.2.0";
+    // package.json and constants.ts must agree (a test enforces this); if they
+    // drift, the runtime constants.ts value wins for the "expected" side.
+    const expected = VERSION.toString();
 
     if (reported === expected) {
       return {

@@ -40,6 +40,8 @@ export async function isPrivateHost(host: string): Promise<boolean> {
 
 export const MAX_READ_BYTES = 128_000;
 export const MAX_BASH_OUTPUT = 32_000;
+/** Per-call cap for live-streamed bash output forwarded to the UI. */
+export const MAX_BASH_STREAM = 64_000;
 export const BASH_TIMEOUT = 120;
 export const GREP_MAX_RESULTS = 200;
 export const GLOB_MAX_RESULTS = 300;
@@ -134,6 +136,23 @@ export interface ToolResult {
 
 export type PermissionFn = (tool: string, args: Record<string, unknown>) => Promise<boolean> | boolean;
 
+/** Live tool telemetry streamed to the UI (see ToolKit.toolEvent). */
+export interface ToolEvent {
+  kind: "start" | "output" | "end";
+  /** Stable id per tool invocation (deltas attach to their start). */
+  callId: string;
+  tool: string;
+  args?: Record<string, unknown>;
+  /** "output": incremental stdout/stderr chunk (truncated lines). */
+  text?: string;
+  /** "end": overall success. */
+  ok?: boolean;
+  /** "end": final result (capped). */
+  result?: string;
+  /** Which subagent (forkIndex) emitted this, if any. */
+  forkIndex?: number;
+}
+
 export interface ExternalTool {
   spec: ToolSpec;
   run: (args: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolResult>;
@@ -220,6 +239,12 @@ export class ToolKit {
   sessionId = "goat";
   private hookAllowNext = false;
   external = new Map<string, ExternalTool>();
+  /**
+   * Live tool telemetry, wired by the UI layers (TUI/web IDE). Receives
+   * start/end plus streaming output deltas from long-running tools (bash).
+   * Never set by the agent loop itself.
+   */
+  toolEvent: ((ev: ToolEvent) => void) | null = null;
 
   private snaps: SnapRecord[] = [];
   private bg = new Map<string, BgTask>();
@@ -345,6 +370,9 @@ export class ToolKit {
   }
 
   async dispatch(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+    const callId = `call_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    this.currentCallId = callId;
+    this.emitToolEvent({ kind: "start", callId, tool: name, args, forkIndex: this.forkIndex });
     try {
       const ext = this.external.get(name);
       // Claude wire-compat: file tools report their arg as file_path
@@ -360,8 +388,8 @@ export class ToolKit {
       this.hookAllowNext = false;
       if (this.hooks?.PreToolUse?.length) {
         const hr = await fireHooks(this.hooks, "PreToolUse", hookPayload(), this.sessionId);
-        if (hr.blocked) return { ok: false, output: `blocked by PreToolUse hook: ${hr.reason ?? "(no reason)"}` };
-        if (hr.decision === "deny") return { ok: false, output: `denied by PreToolUse hook: ${hr.reason ?? ""}` };
+        if (hr.blocked) return this.endToolEvent(callId, name, { ok: false, output: `blocked by PreToolUse hook: ${hr.reason ?? "(no reason)"}` });
+        if (hr.decision === "deny") return this.endToolEvent(callId, name, { ok: false, output: `denied by PreToolUse hook: ${hr.reason ?? ""}` });
         if (hr.decision === "allow") this.hookAllowNext = true;
         if (hr.updatedInput) { args = hr.updatedInput; } // hook rewrote the tool input
       }
@@ -369,7 +397,7 @@ export class ToolKit {
       if (ext) {
         if (ext.mutating && !this.hookAllowNext) {
           const denied = await this.ask(name, args);
-          if (denied) return denied;
+          if (denied) return this.endToolEvent(callId, name, denied);
         }
         result = await ext.run(args, signal);
       } else {
@@ -385,11 +413,25 @@ export class ToolKit {
         }, this.sessionId);
         if (hr.blocked) result = { ok: false, output: `PostToolUse hook flagged output: ${hr.reason ?? "(exit 2)"}` };
       }
-      return result;
+      return this.endToolEvent(callId, name, result);
     } catch (e: any) {
       const err = e instanceof GoatError ? e : Object.assign(new Error(), e, { code: 'ERR_GENERIC' });
-      return { ok: false, output: formatError(err) };
+      return this.endToolEvent(callId, name, { ok: false, output: formatError(err) });
     }
+  }
+
+  private emitToolEvent(ev: ToolEvent): void {
+    try { this.toolEvent?.(ev); } catch { /* telemetry must never break the tool */ }
+  }
+
+  /** dispatch() assigns the per-call id; tools that stream their own output
+   *  deltas (bash) reuse it so the UI can attach every chunk to the right row. */
+  private currentCallId: string | null = null;
+
+  /** Attach ok/result to a finished dispatch and emit the end event. */
+  private endToolEvent(callId: string, tool: string, result: ToolResult): ToolResult {
+    this.emitToolEvent({ kind: "end", callId, tool, ok: result.ok, result: result.output.slice(0, 4_000), forkIndex: this.forkIndex });
+    return result;
   }
 
   private async ask(tool: string, args: Record<string, unknown>): Promise<ToolResult | null> {
@@ -470,6 +512,11 @@ export class ToolKit {
     return this.snaps.length > boundary ? this.snaps[this.snaps.length - 1] : null;
   }
 
+  /** Every snapshot captured this session, oldest first (for /diff). */
+  allSnaps(): SnapRecord[] {
+    return [...this.snaps];
+  }
+
   undoAll(): SnapRecord[] {
     const out: SnapRecord[] = [];
     while (this.snaps.length) out.push(this.undo()!);
@@ -540,9 +587,8 @@ export class ToolKit {
       };
     }
     const size = statSync(p).size;
-    // Streaming read for large files (>100KB): reads in 64KB chunks via fd.read
+    // Streaming read for large files (>100KB): reads in 64KB chunks
     if (size > 100_000) {
-      const fdSync = () => { /* handled async below */ };
       return this._toolReadStreaming(p, args);
     }
     let text: string;
@@ -738,11 +784,28 @@ export class ToolKit {
         cwd: this.root, env: process.env,
       });
       let out = "", err = "";
+      // live output: forward merged stdout/stderr to toolEvent subscribers as
+      // line-delimited chunks so long builds render progressively in the UI.
+      // Deltas reuse dispatch's callId so the UI attaches them to the right row.
+      let lineBuf = "";
+      let streamed = 0;
+      const bashCallId = this.currentCallId ?? `bash_${Date.now().toString(36)}`;
+      const streamOut = (chunk: string) => {
+        lineBuf += chunk;
+        let nl: number;
+        while ((nl = lineBuf.indexOf("\n")) >= 0) {
+          const line = lineBuf.slice(0, nl + 1);
+          lineBuf = lineBuf.slice(nl + 1);
+          streamed += line.length;
+          if (streamed <= MAX_BASH_STREAM) this.emitToolEvent({ kind: "output", callId: bashCallId, tool: "bash", text: line });
+        }
+      };
       const timer = setTimeout(() => { child.kill(); done({ ok: false, output: `command timed out after ${timeout / 1000}s` }); }, timeout);
-      child.stdout.on("data", (d) => { out += d; });
-      child.stderr.on("data", (d) => { err += d; });
+      child.stdout.on("data", (d) => { out += d; streamOut(d.toString()); });
+      child.stderr.on("data", (d) => { err += d; streamOut(d.toString()); });
       child.on("close", (code) => {
         clearTimeout(timer);
+        if (lineBuf) streamOut("\n");
         const combined = out + (err ? `\n[stderr]\n${err}` : "");
         // keep head AND tail: for builds/tests the actionable error is at the end
         const capped = combined.length > MAX_BASH_OUTPUT

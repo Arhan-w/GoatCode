@@ -54,6 +54,8 @@ import { contentChars, estimateTokens } from "./llm.ts";
 import type { ContentPart } from "./llm.ts";
 import type { Todo } from "./tools.ts";
 import type { CollabSession } from "./collab/client.ts";
+import { costUsd } from "./pricing.ts";
+import { loadCustomAgents, agentDirs } from "./agents/loader.ts";
 
 // ---------- theme (goat noir: deep slate + black-green) ----------
 export const ACCENT = "#a855f7";
@@ -218,6 +220,12 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
   const [pasted, setPasted] = useState<string | null>(null); // ctrl+V image path
   const [todos, setTodos] = useState<Todo[]>([]);
   const [statusLines, setStatusLines] = useState<string[]>([]);
+  // live streaming tool output: { tool, brief, lines } for the running call
+  const [toolLive, setToolLive] = useState<{ tool: string; brief: string; lines: string[] } | null>(null);
+  /** Lines of streamed tool output kept visible in the live frame. */
+  const TOOL_LIVE_LINES = 6;
+  /** ctrl+j toggles the full streamed transcript inline. */
+  const [toolVerbose, setToolVerbose] = useState(false);
 
   // Command palette state
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
@@ -443,6 +451,14 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         cache: cfgRef.current.cachePrompts,
         extraSystem: [buildExtraSystem(skills, sessionRef.current.cwd, resolveRepos(cfgRef.current.repos, sessionRef.current.cwd)),
           loadOutputStyle(cfgRef.current.outputStyle)].filter(Boolean).join("\n\n"),
+        customAgents: loadCustomAgents(...agentDirs(sessionRef.current.cwd)),
+        // custom-agent `model:` overrides resolve through the same path as the
+        // primary model (credentials + OAuth refresh included)
+        resolveClientFor: async (model) => {
+          const alt = { ...cfgRef.current, model };
+          splitModel(alt);
+          return (await resolve(alt, registryRef.current)).client;
+        },
       });
     } catch (e) {
       const msg = e instanceof ResolveError ? e.message : String((e as Error).message);
@@ -505,9 +521,23 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
                 <Text dimColor color={DIM}>{brief}</Text>
               </Text>,
             );
+            // long-running tools (bash) stream their output into a live frame
+            if (ev.tool === "bash" || ev.tool === "grep" || ev.tool === "glob") {
+              setToolLive({ tool: ev.tool, brief, lines: [] });
+            }
+            break;
+          }
+          case "tool_output": {
+            // append streamed chunk to the live frame (keep the last N lines)
+            setToolLive((cur) => {
+              if (!cur) return cur;
+              const lines = [...cur.lines, ...ev.text.split("\n")].filter((l) => l.length > 0).slice(-TOOL_LIVE_LINES);
+              return { ...cur, lines };
+            });
             break;
           }
           case "tool_end": {
+            setToolLive(null);
             const first = (ev.result || "").split("\n")[0]?.slice(0, 160) ?? "";
             push(
               <Text>
@@ -747,6 +777,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           return native.length + fromPlugins.length;
         },
         runTurn,
+        sessionSnaps: () => (toolsRef.current?.allSnaps() ?? []).map((s) => ({ path: s.path, before: s.before, after: s.after })),
+        customAgents: () => loadCustomAgents(...agentDirs(sessionRef.current.cwd)).map((a) => ({ name: a.name, description: a.description, tools: a.tools })),
         compactNow: async () => {
           const agent = await buildAgent();
           if (!agent) return "compact failed — no usable client";
@@ -824,7 +856,6 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
       return;
     }
     if (k.ctrl && ch === "d") { exit(); return; }
-    if (k.ctrl && ch === "k") { setInput(""); return; }
     if (k.ctrl && ch === "k") { setInput(""); return; } // clear current input line
     if (k.ctrl && ch === "v") {
       // clipboard image attach (Claude-Code-style); text pastes are handled by
@@ -854,6 +885,11 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
             <Text dimColor color={DIM}>  {t.cmd.slice(0, 48)}</Text>
           </Text>,
         );
+      return;
+    }
+    if (k.ctrl && ch === "j") {
+      // toggle verbose streamed tool output in the live frame
+      setToolVerbose((v) => !v);
       return;
     }
     if (k.ctrl && ch === "o") { cycleMode(); return; }
@@ -964,6 +1000,16 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           </Text>
           {thinkLine && !stream ? <Text dimColor color={DIM}>  {thinkLine}</Text> : null}
           {stream ? <MdText text={stream} /> : null}
+          {toolLive ? (
+            <Box flexDirection="column" paddingLeft={2} marginTop={0}>
+              {(toolVerbose ? toolLive.lines : toolLive.lines.slice(-TOOL_LIVE_LINES)).map((l, i) => (
+                <Text key={i} color="#9aa3b8">{l.slice(0, Math.max(40, cols() - 6))}</Text>
+              ))}
+              {!toolVerbose && toolLive.lines.length > TOOL_LIVE_LINES ? (
+                <Text dimColor color={DIM}>  … {toolLive.lines.length - TOOL_LIVE_LINES} more lines (ctrl+j for all)</Text>
+              ) : null}
+            </Box>
+          ) : null}
           <Text dimColor color={DIM}>  esc to interrupt</Text>
         </Box>
       )}
@@ -1026,12 +1072,18 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
               const c = pct > 0.9 ? RED : pct > 0.7 ? "#facc15" : DIM;
               return <Text color={c}>{`ctx ${Math.round(pct * 100)}%`}</Text>;
             })()}
+            {(() => {
+              const usd = costUsd(cfg.model, session.usage);
+              if (usd == null || usd <= 0) return null;
+              return <Text color={GREEN}>  ·  ${usd < 0.01 ? usd.toFixed(4) : usd.toFixed(2)}</Text>;
+            })()}
+            {queuedRef.current.length ? <Text color={ACCENT}>  ·  ⤷ {queuedRef.current.length} queued</Text> : null}
             {mcp?.servers.size ? <Text dimColor color={DIM}>  ·  {mcp.servers.size} mcp</Text> : null}
             {skills.length ? <Text dimColor color={DIM}>  ·  {skills.length} skills</Text> : null}
           </Text>
           <Text dimColor color={DIM}>
             <Text color={ACCENT}>/help</Text>
-            <Text dimColor color={DIM}> · ctrl+t tasks · /undo · ⌘P commands</Text>
+            <Text dimColor color={DIM}> · ctrl+t tasks · ctrl+j verbose · /undo · ⌘P commands</Text>
           </Text>
         </Box>
       )}
@@ -1054,6 +1106,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
                 runTurn: async (text: any) => {},
                 sessionRules: () => [],
                 undoTurn: () => null,
+                sessionSnaps: () => (toolsRef.current?.allSnaps() ?? []).map((s) => ({ path: s.path, before: s.before, after: s.after })),
+                customAgents: () => loadCustomAgents(...agentDirs(sessionRef.current.cwd)).map((a) => ({ name: a.name, description: a.description, tools: a.tools })),
               };
               runSlash(line, io);
             }

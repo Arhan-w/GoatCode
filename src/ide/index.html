@@ -495,8 +495,23 @@ function connect() {
       case "agent": {
         const ev = m.ev;
         if (ev.kind === "text") appendAsst(ev.text);
-        else if (ev.kind === "tool_start") { const row = toolRow(ev.tool, ev.args || {}); row._tool = ev.tool; toolRows.set(ev.callId ?? toolRows.size, row); }
-        else if (ev.kind === "tool_end") { const row = [...toolRows.values()].pop(); if (row) toolDone(row, ev.result, ev.ok); }
+        else if (ev.kind === "tool_start") { const row = toolRow(ev.tool, ev.args || {}); row._tool = ev.tool; row._out = ""; toolRows.set(ev.callId ?? toolRows.size, row); }
+        else if (ev.kind === "tool_output") {
+          // live-stream the running tool's output into its row body
+          const row = toolRows.get(ev.callId);
+          if (row) {
+            row._out = ((row._out || "") + ev.text).split("\n").slice(-8).join("\n");
+            row.classList.add("open");
+            const body = row.querySelector(".body");
+            body.textContent = row._out;
+            body.scrollTop = body.scrollHeight;
+            stick();
+          }
+        }
+        else if (ev.kind === "tool_end") {
+          const row = toolRows.get(ev.callId) ?? [...toolRows.values()].pop();
+          if (row) toolDone(row, ev.result, ev.ok);
+        }
         else if (ev.kind === "todo") renderPlan(ev.todos);
         else if (ev.kind === "retry") addNote(`↻ retrying in ${(ev.waitMs/1000).toFixed(1)}s — ${ev.reason}`, "retryline");
         else if (ev.kind === "done") closeAsst();

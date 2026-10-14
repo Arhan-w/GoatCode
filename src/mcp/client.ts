@@ -7,7 +7,7 @@
  */
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { McpServerConfigSchema, type McpServerConfig } from "./types.ts";
+import { McpServerConfigSchema, type McpServerConfig, type McpStdioServer, type McpRemoteServer } from "./types.ts";
 import type { ToolSpec } from "../llm.ts";
 import type { ToolResult } from "../tools.ts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -47,7 +47,7 @@ export class McpClient {
   async add(name: string, config: McpServerConfig): Promise<McpServerEntry | null> {
     let transport: any;
     if (config.type === "stdio" || !config.type) {
-      const stdio = config as import("./types.ts").McpStdioServer;
+      const stdio = config as McpStdioServer;
       transport = new StdioClientTransport({
         command: stdio.command, args: stdio.args ?? [],
         env: { ...process.env, ...stdio.env } as Record<string, string>,
@@ -55,7 +55,7 @@ export class McpClient {
     } else if (config.type === "sse") {
       transport = new SSEClientTransport(new URL(config.url), { requestInit: { headers: config.headers } });
     } else {
-      const remote = config as import("./types.ts").McpRemoteServer;
+      const remote = config as McpRemoteServer;
       transport = new StreamableHTTPClientTransport(new URL(remote.url), { requestInit: { headers: remote.headers } });
     }
 

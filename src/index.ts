@@ -43,6 +43,7 @@ import { VERSION } from "./constants.ts";
 import { selfUpdate, checkForUpdate, refreshUpdateHint } from "./update.ts";
 import { ConfigError } from "./errors.ts";
 import { runDoctor } from "./doctor.ts";
+import { loadCustomAgents, agentDirs } from "./agents/loader.ts";
 
 import { allSkills } from "./index-shared.ts";
 export { allSkills };
@@ -526,6 +527,12 @@ async function main(): Promise<number> {
       cache: cfg.cachePrompts,
       extraSystem: [buildExtraSystem(allSkills(cfg), process.cwd(), resolveRepos(cfg.repos, process.cwd())),
         loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
+      customAgents: loadCustomAgents(...agentDirs(process.cwd())),
+      resolveClientFor: async (model) => {
+        const alt = { ...cfg, model };
+        splitModel(alt);
+        return (await resolve(alt, registry)).client;
+      },
     });
     let out = "";
     let failed = "";

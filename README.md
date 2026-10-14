@@ -1,6 +1,6 @@
 <div align="center">
 
-# GoatCode v3.3.8
+# GoatCode v3.4.0
 ### 🐐 The Autonomous Multi-Repo AI Coding Agent for the Terminal
 
 [![CI/CD](https://github.com/Arhan-w/GoatCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Arhan-w/GoatCode/actions)
@@ -149,6 +149,7 @@ Switch models anytime:
 | **[Commands Reference](docs/COMMANDS.md)** | Complete slash command documentation |
 | **[Architecture](docs/ARCHITECTURE.md)** | System design, modules, and internals |
 | **[API & JSON-RPC](docs/API.md)** | Run as a service, remote agent mounting |
+| **[Custom Agents](docs/AGENTS.md)** | Define reusable subagent personas with tool allowlists |
 | **[Contributing](CONTRIBUTING.md)** | How to develop, test, and contribute |
 | **[FAQ](docs/FAQ.md)** | Common questions and troubleshooting |
 
@@ -342,7 +343,7 @@ MIT License © 2026 Arhan (Goated). See [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**[⬆ back to top](#goatcode-v337)**
+**[⬆ back to top](#goatcode-v340)**
 
 Made with 🐐 by [Arhan](https://github.com/Arhan-w)
 

@@ -6,7 +6,8 @@
 import { buildSystemPrompt } from "./system-prompt.ts";
 import { contentChars, isRetryableLLMError, textOf, type ChatClient, type ContentPart, type Message, type StreamEvent, type ToolCall, type ToolSpec } from "./llm.ts";
 import { Session, summarize } from "./session.ts";
-import { ToolKit, getToolSpec, type PermissionFn, type Todo, type ToolResult } from "./tools.ts";
+import { ToolKit, getToolSpec, type PermissionFn, type Todo, type ToolEvent, type ToolResult } from "./tools.ts";
+import type { AgentDef } from "./agents/loader.ts";
 import { fireHooks, MAX_STOP_HOOK_CONTINUES } from "./hooks.ts";
 import { SUBAGENT_MAX_STEPS } from "./constants.ts";
 import { ConfigError, ProviderError, AuthError, RateLimitError, GoatError, GenericError } from "./errors.ts";
@@ -25,8 +26,9 @@ export const REQUEST_TIMEOUT_MS = (() => {
 export type AgentEvent =
   | { kind: "text"; text: string }
   | { kind: "thinking"; text: string }
-  | { kind: "tool_start"; tool: string; args: Record<string, unknown> }
-  | { kind: "tool_end"; tool: string; result: string; ok: boolean }
+  | { kind: "tool_start"; tool: string; args: Record<string, unknown>; callId?: string }
+  | { kind: "tool_output"; callId: string; tool: string; text: string }
+  | { kind: "tool_end"; tool: string; result: string; ok: boolean; callId?: string }
   | { kind: "usage"; text: string; usage?: { prompt: number; completion: number; cacheRead?: number; cacheWrite?: number } }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
   | { kind: "retry"; attempt: number; waitMs: number; reason: string }
@@ -63,6 +65,14 @@ export interface AgentDeps {
   /** Providers tried, in order, when the primary hard-fails before streaming
    *  any content (quota exhausted, bad/expired auth, provider down). */
   fallbacks?: Array<{ client: ChatClient; model: string }>;
+  /** Live tool telemetry sink (UI wiring). Forwarded to tools.toolEvent. */
+  onToolEvent?: (ev: ToolEvent) => void;
+  /** Custom subagent definitions (subagent_type -> persona + tool allowlist). */
+  customAgents?: AgentDef[];
+  /** Resolve an arbitrary model string ("provider/model") to a live client.
+   *  Powers the custom-agent `model:` override; when absent (tests) the
+   *  override falls back to the parent's client. */
+  resolveClientFor?: (model: string) => Promise<ChatClient>;
 }
 
 export class Agent {
@@ -80,6 +90,10 @@ export class Agent {
   disallowedTools: Set<string>;
   fallbacks: Array<{ client: ChatClient; model: string }>;
   cache: boolean;
+  /** Custom subagent types this agent can spawn (name -> def). */
+  customAgents: AgentDef[];
+  /** Model-string -> live client resolver for custom-agent model overrides. */
+  resolveClientFor?: (model: string) => Promise<ChatClient>;
   /** Real prompt-token count of the most recent API call (true context size). */
   lastPromptTokens = 0;
   /** Circuit breaker: tracks consecutive failures per provider to avoid rapid re-failure. */
@@ -104,6 +118,9 @@ export class Agent {
     this.disallowedTools = deps.disallowedTools ?? new Set();
     this.fallbacks = deps.fallbacks ? [...deps.fallbacks] : [];
     this.cache = deps.cache ?? false;
+this.customAgents = deps.customAgents ?? [];
+    this.resolveClientFor = deps.resolveClientFor;
+    if (deps.onToolEvent) this.tools.toolEvent = deps.onToolEvent;
   }
 
   /** Record a failure for a provider in the circuit breaker. */
@@ -148,7 +165,8 @@ export class Agent {
 
   private messages(): Message[] {
     const ctx = this.session.context();
-    let sys = buildSystemPrompt(this.session.cwd);
+    const agentDescs = this.customAgents.map((a) => `${a.name}: ${a.description}${a.tools?.length ? ` (tools: ${a.tools.join(", ")})` : ""}`);
+    let sys = buildSystemPrompt(this.session.cwd, agentDescs);
     if (this.extraSystem) sys += "\n\n" + this.extraSystem;
     const msgs: Message[] = [{ role: "system", content: sys }];
     if (this.session.compactedFrom > 0) {
@@ -255,9 +273,25 @@ export class Agent {
           batch.push(call);
         }
 
-        // Execute batch
+        // Execute batch. Wrap toolEvent once around the batch: capture the
+        // per-call id dispatch assigns (start) and queue streamed output
+        // deltas so they can be yielded with the model-side ToolCall id.
+        // Always installed — deltas feed the UI even when no toolEvent sink
+        // is attached (the TUI consumes runTurn events directly).
+        const outerToolEvent = this.tools.toolEvent;
+        const callIds = new Map<ToolCall, string>();
+        const streamedDeltas: Array<{ callId: string; tool: string; text: string }> = [];
+        this.tools.toolEvent = (ev) => {
+          try { outerToolEvent?.(ev); } catch { /* sink errors are already isolated */ }
+          if (ev.kind === "start") {
+            const match = batch.find((c) => c.name === ev.tool && !callIds.has(c));
+            if (match) callIds.set(match, ev.callId);
+          } else if (ev.kind === "output") {
+            streamedDeltas.push({ callId: ev.callId, tool: ev.tool, text: ev.text ?? "" });
+          }
+        };
         for (const call of batch) {
-          yield { kind: "tool_start", tool: call.name, args: call.arguments };
+          yield { kind: "tool_start", tool: call.name, args: call.arguments, callId: call.id };
         }
         if (batch.length === 1) {
           const call = batch[0];
@@ -277,6 +311,13 @@ export class Agent {
           );
           batch.forEach((call, k) => results.set(call, settled[k]));
         }
+        this.tools.toolEvent = outerToolEvent;
+        // Forward streamed output mapped to the model-side call id so the UI
+        // can attach deltas to the row it created for this ToolCall.
+        for (const d of streamedDeltas) {
+          const call = batch.find((c) => callIds.get(c) === d.callId);
+          yield { kind: "tool_output", callId: call?.id ?? d.callId, tool: d.tool, text: d.text };
+        }
         // Record completed writes for conflict detection
         for (const call of batch) {
           const deps = getToolSpec(call.name, call.arguments);
@@ -290,7 +331,7 @@ export class Agent {
           content: result.content ?? result.output.slice(0, 60_000),
           toolCallId: call.id, name: call.name,
         });
-        yield { kind: "tool_end", tool: call.name, result: result.output.slice(0, 2000), ok: result.ok };
+        yield { kind: "tool_end", tool: call.name, result: result.output.slice(0, 2000), ok: result.ok, callId: call.id };
         if (call.name === "todo" && result.ok)
           yield { kind: "todo", todos: this.tools.plan() };
       }
@@ -439,8 +480,18 @@ export class Agent {
     const prompt = String(args.prompt ?? "").trim();
     if (!prompt) return { ok: false, output: "task requires a prompt" };
     const description = String(args.description ?? "subagent").slice(0, 60);
-    const explore = String(args.subagent_type ?? "") === "explore";
-    const disallowed = new Set(["task", "write", "edit", "undo", ...(explore ? ["bash", "computer"] : ["computer"])]);
+    const agentType = String(args.subagent_type ?? "");
+    const explore = agentType === "explore";
+    // custom agent types (loaded from ~/.goatcode/agents, ./agents, ./.goat/agents)
+    const custom = this.customAgents.find((a) => a.name === agentType);
+    const disallowed = new Set(["task", "undo", ...(explore || custom ? ["write", "edit"] : ["write", "edit"]), "computer"]);
+    // a custom agent's tool allowlist hides everything not listed
+    if (custom?.tools?.length) {
+      const allowed = new Set(custom.tools);
+      for (const s of this.tools.specs()) if (!allowed.has(s.name)) disallowed.add(s.name);
+      disallowed.add("task"); // custom agents never spawn subagents
+      disallowed.add("undo"); // and never touch the undo stack
+    }
 
     // --- isolated toolkit clone ---
     const subToolKit = this.tools.clone();
@@ -448,27 +499,33 @@ export class Agent {
     const forkIdx = (this.session.subagentForks?.length ?? 0);
     subToolKit.forkIndex = forkIdx;
 
-    // --- forked session ---
-    const sub = new Session({
+    // resolve the child's model: a custom agent's `model:` override wins,
+    // explore agents route to the cheap model when configured, else the parent's
+    let childClient = explore && this.smallClient ? this.smallClient : this.client;
+    if (custom?.model && this.resolveClientFor) {
+      try { childClient = await this.resolveClientFor(custom.model); }
+      catch { /* unresolvable override — fall back to the parent client */ }
+    }
+    const forkSession = new Session({
       id: `sub-${crypto.randomUUID()}`,
       cwd: this.session.cwd,
-      model: this.session.model,
+      model: custom?.model ?? this.session.model,
     });
-    sub.title = `subagent: ${description}`;
+    forkSession.title = `subagent: ${description}`;
     // record the fork in the parent session
     this.session.addSubagentFork({
-      childId: sub.id,
+      childId: forkSession.id,
       description,
       explore,
       startedAt: Date.now(),
     });
-
     const child = new Agent({
-      // explore agents are pure reading: route them to the cheap model if configured
-      client: explore && this.smallClient ? this.smallClient : this.client,
-      session: sub, tools: subToolKit,
+      client: childClient,
+      session: forkSession, tools: subToolKit,
       maxTokens: this.maxTokens, temperature: this.temperature,
-      maxSteps: SUBAGENT_MAX_STEPS, extraSystem: this.extraSystem,
+      maxSteps: SUBAGENT_MAX_STEPS,
+      extraSystem: [this.extraSystem, custom?.body ? `## Agent: ${custom.name}\n\n${custom.body}` : ""]
+        .filter(Boolean).join("\n\n"),
       retryBaseMs: this.retryBaseMs, maxAttempts: this.maxAttempts,
       requestTimeoutMs: this.requestTimeoutMs, disallowedTools: disallowed,
     });
@@ -481,7 +538,7 @@ export class Agent {
       else if (ev.kind === "error") error = ev.text;
     }
     // record completion in the parent session
-    this.session.completeSubagentFork(sub.id, { stepsUsed, error });
+    this.session.completeSubagentFork(forkSession.id, { stepsUsed, error });
 
     const final = text.trim();
     if (!final)

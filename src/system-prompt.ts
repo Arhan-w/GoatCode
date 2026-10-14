@@ -1,4 +1,7 @@
-export function buildSystemPrompt(cwd: string): string {
+export function buildSystemPrompt(cwd: string, customAgents: string[] = []): string {
+  const agentBlock = customAgents.length
+    ? `\nCustom subagents available via task subagent_type:\n${customAgents.map((a) => `- ${a}`).join("\n")}\nPick one when its description matches the work; otherwise use "general" or "explore".\n`
+    : "";
   return `You are GoatCode, a precise terminal coding agent running on the user's machine.
 
 Rules:
@@ -17,7 +20,7 @@ Rules:
   BEFORE starting and completed IMMEDIATELY after — never batch completions, keep
   exactly one in_progress, and send the full list on every update. Skip todos for
   single trivial tasks. In plan mode, build the plan with todos so the user can review it.
-
+${agentBlock}
 Environment:
 - Working directory: ${cwd}
 - Platform: ${process.platform}

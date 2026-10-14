@@ -23,19 +23,26 @@ function assetName() {
   const os = osMap[process.platform];
   const arch = archMap[process.arch];
   if (!os || !arch) return null;
-  const exe = os === "windows" ? ".exe" : "";
-  // Windows release asset is named just "goat.exe" not "goat-windows-x64.exe"
-  if (os === "windows") return `goat${exe}`;
-  return `goat-${os}-${arch}${exe}`;
+  // Release assets are named goat-<os>-<arch>[.exe] — e.g. goat-windows-x64.exe,
+  // goat-darwin-arm64, goat-linux-x64 (see .github/workflows/release.yml).
+  return `goat-${os}-${arch}${os === "windows" ? ".exe" : ""}`;
 }
 
-/** Name of the -ide archive that bundles the binary + vendored Monaco. */
+/** Alternate asset name tried when the primary is missing (legacy releases). */
+function assetNameFallback() {
+  if (process.platform === "win32") return "goat.exe";
+  return null;
+}
+
+/** Name of the -ide archive that bundles the vendored Monaco assets.
+ *  Windows ships .zip (Compress-Archive); unix ships .tar.gz. */
 function ideArchiveName() {
   const osMap = { darwin: "darwin", linux: "linux", win32: "windows" };
   const archMap = { x64: "x64", arm64: "arm64" };
   const os = osMap[process.platform];
   const arch = archMap[process.arch];
   if (!os || !arch) return null;
+  if (os === "windows") return `goat-${os}-${arch}-ide.zip`;
   return `goat-${os}-${arch}-ide.tar.gz`;
 }
 
@@ -74,9 +81,12 @@ function install(cb) {
   const target = targetPath();
   const part = target + ".download";
   const archive = ideArchiveName();
-  const archivePart = path.join(PKG_BIN, "ide.tar.gz.download");
+  const archivePart = path.join(PKG_BIN, (archive || "ide.tar.gz") + ".download");
   const urls = [
     `https://github.com/${REPO}/releases/download/v${VERSION}/${name}`,
+    ...(assetNameFallback()
+      ? [`https://github.com/${REPO}/releases/download/v${VERSION}/${assetNameFallback()}`]
+      : []),
     `https://github.com/${REPO}/releases/latest/download/${name}`,
   ];
   (function next(i) {
@@ -100,7 +110,20 @@ function install(cb) {
                 const stage = path.join(PKG_BIN, ".ide-stage");
                 fs.rmSync(stage, { recursive: true, force: true });
                 fs.mkdirSync(stage, { recursive: true });
-                execFileSync("tar", ["-xzf", archivePart, "-C", stage], { stdio: "ignore" });
+                if (archive.endsWith(".zip")) {
+                  // bsdtar (bundled with Windows 10+/macOS) extracts zip; fall
+                  // back to PowerShell Expand-Archive when tar can't.
+                  try {
+                    execFileSync("tar", ["-xf", archivePart, "-C", stage], { stdio: "ignore" });
+                  } catch {
+                    execFileSync("powershell", [
+                      "-NoProfile", "-NonInteractive", "-Command",
+                      `Expand-Archive -LiteralPath '${archivePart}' -DestinationPath '${stage}' -Force`,
+                    ], { stdio: "ignore" });
+                  }
+                } else {
+                  execFileSync("tar", ["-xzf", archivePart, "-C", stage], { stdio: "ignore" });
+                }
                 const src = path.join(stage, "ide-vendor");
                 if (fs.existsSync(src)) {
                   const dest = ideVendorPath();
@@ -136,4 +159,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { install, assetName, targetPath };
+module.exports = { install, assetName, assetNameFallback, ideArchiveName, targetPath };

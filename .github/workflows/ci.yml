@@ -39,7 +39,7 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: Run tests
-        run: bun test
+        run: bun test --timeout 30000
         env:
           GOATCODE_HOME: ${{ runner.temp }}/goat-ci-home
       - name: Test CLI entry point

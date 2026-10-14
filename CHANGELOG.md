@@ -2,6 +2,26 @@
 
 All notable changes to GoatCode. Versions match git tags and npm releases.
 
+## [3.4.0] - 2026-10-15
+### Added
+- **Custom subagent `model:` override** — custom agents (`.goat/agents/NAME.md`) can now declare `model: provider/model` in frontmatter to run on a different model than the parent. Resolved through the same credential/OAuth path.
+- **Project-level agent priority** — `./.goat/agents/` and `./agents/` now take precedence over `~/.goatcode/agents/` when the same agent name exists in multiple roots (docs/AGENTS.md spec).
+- **Windows postinstall fix** — npm installer now downloads the correct release assets (`goat-windows-x64.exe`, `goat-windows-x64-ide.zip`) with zip extraction via `tar -xf` / PowerShell `Expand-Archive`.
+- **Doctor improvements** — `goat doctor` now checks version against `src/constants.ts` (single source of truth), uses global `fetch` (no more `node:fetch` crash), and retargets the MCP config type import to the live module.
+- **Dead code cleanup** — removed 6 unused modules (`ui.ts`, `collab.ts`, `mcp-enhanced.ts`, `session-db.ts`, `skills.ts`, `types.ts`), pruned phantom ambient declarations (kept only `onnxruntime-node`/`@xenova/transformers` for semantic indexing), and eliminated duplicate comments/empty blocks in `tools.ts`, `tui.tsx`, `agent.ts`.
+- **IDE server MIME fix** — vendored Monaco assets now serve the correct `content-type` based on the actual file found, not the first candidate path.
+- **CI hardening** — `bun test --timeout 30000` to prevent cold-transpile flakes on CI.
+- **Onboarding version fix** — first-run wizard now shows the actual `VERSION` instead of hardcoded `v3.2`, and uses template literals for the provider name in auth hints.
+
+### Fixed
+- npm postinstall: Windows asset name mismatch (was `goat.exe`, now `goat-windows-x64.exe` with `goat.exe` fallback).
+- `goat doctor` crashed internally on `node:fetch` (swallowed per-provider, showed bogus "4/4 providers unreachable").
+- Custom agent loader priority contradicted docs: user-level was winning over project-level.
+- Custom agent `model:` frontmatter field was parsed but never used.
+- Duplicate `ctrl+k` handler in TUI, dead `fdSync` in `tools.ts`, pointless delete-then-add for "task"/"undo" in `agent.ts`.
+- `src/mcp/client.ts` type import pointed to deleted `types.ts` (now `config.ts`).
+- `onboarding.ts` printed literal `${provider}` string and hardcoded "v3.2".
+
 ## [3.3.8] - 2026-10-14
 ### Added
 - **GoatCode IDE (`goat ide`)** — a full local web IDE: vendored Monaco editor
