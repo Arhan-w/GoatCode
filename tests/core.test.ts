@@ -1388,9 +1388,14 @@ describe("background bash", () => {
     expect(tk.backgroundTasks().some((t) => t.id === id)).toBe(true);
     const listed = await tk.dispatch("tasks", {});
     expect((listed as any).output).toContain(id);
-    // wait for completion, status changes
-    await new Promise((res) => setTimeout(res, 2600));
-    const done = tk.backgroundTasks().find((t) => t.id === id)!;
+    // wait for completion, status changes — poll with a deadline (a fixed
+    // sleep flakes on slow CI runners where cmd.exe startup eats the margin)
+    const deadline = Date.now() + 15_000;
+    let done = tk.backgroundTasks().find((t) => t.id === id)!;
+    while (done.status === "running" && Date.now() < deadline) {
+      await new Promise((res) => setTimeout(res, 250));
+      done = tk.backgroundTasks().find((t) => t.id === id)!;
+    }
     expect(done.status).not.toBe("running");
     rmSync(root, { recursive: true, force: true });
   });
