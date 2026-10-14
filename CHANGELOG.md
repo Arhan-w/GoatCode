@@ -2,6 +2,35 @@
 
 All notable changes to GoatCode. Versions match git tags and npm releases.
 
+## [3.3.8] - 2026-10-14
+### Added
+- **GoatCode IDE (`goat ide`)** — a full local web IDE: vendored Monaco editor
+  (the VS Code engine, MIT) in the noir theme, file explorer with tabs and
+  dirty markers, and the same agent engine as the terminal in a chat panel —
+  tools stream live, permission prompts are clickable cards, plan todos render
+  inline. Local-only (127.0.0.1 + per-boot token), works fully offline.
+- **`multiedit` tool** — apply several exact string replacements to one file
+  atomically: all-or-nothing on any failed hunk, later hunks see earlier
+  hunks' output, one undo reverts the whole batch.
+- Release pipeline ships `*-ide.zip`/`.tar.gz` archives bundling the binary
+  with the vendored Monaco assets; installers (install.ps1, install.sh, npm
+  postinstall) extract them to `~/.goatcode/ide-vendor`.
+
+### Fixed
+- SSE parser regression from v3.2: the buffered rewrite re-added parsed lines
+  into the read buffer (lost/duplicated deltas, hang on short streams). Back
+  to the line-based parser with proper stream-final decode.
+- Session persistence regression: `save()` is synchronous + atomic again
+  (tmp+rename). The async append-style save wrote a full copy of the session
+  on every call (quadratic growth) and callers never awaited it, dropping
+  saves mid-turn. `load()` keeps legacy format compatibility.
+- Print mode (`goat -p`) routed through a hollow `EnhancedAgent` that faked
+  subagent results and ignored retry/fallback; now uses the real `Agent`.
+- Version drift: npm-package metadata now tracks `src/constants.ts` exactly
+  (enforced by test).
+- IDE test no longer `chdir`s the runner into a temp dir it deletes (CI
+  uv_cwd failures on Linux).
+
 ## [2.1.3] - 2026-09-10
 ### Added
 - **Interactive `goat auth`** — running `goat auth` with no arguments now

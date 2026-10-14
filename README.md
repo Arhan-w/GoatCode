@@ -1,6 +1,6 @@
 <div align="center">
 
-# GoatCode v3.3.7
+# GoatCode v3.3.8
 ### 🐐 The Autonomous Multi-Repo AI Coding Agent for the Terminal
 
 [![CI/CD](https://github.com/Arhan-w/GoatCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Arhan-w/GoatCode/actions)
