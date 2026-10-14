@@ -20,7 +20,9 @@ beforeEach(() => {
   savedEnv.GOATCODE_HOME = process.env.GOATCODE_HOME;
   process.env.GOATCODE_HOME = home;
   mkdirSync(root, { recursive: true });
-  process.chdir(root);
+  // NOTE: no process.chdir here — chdir'ing into a temp dir that afterEach
+  // then deletes leaves the runner's cwd dangling (uv_cwd failures in every
+  // later test on Linux). The subprocess gets `cwd: root` instead.
   writeFileSync(join(root, "hello.txt"), "hello world\n");
 });
 afterEach(() => {
