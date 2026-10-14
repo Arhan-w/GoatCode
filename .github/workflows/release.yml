@@ -14,10 +14,13 @@ jobs:
         include:
           - os: windows-latest
             out: goat-windows-x64.exe
+            archive: goat-windows-x64-ide.zip
           - os: ubuntu-latest
             out: goat-linux-x64
+            archive: goat-linux-x64-ide.tar.gz
           - os: macos-latest
             out: goat-darwin-arm64
+            archive: goat-darwin-arm64-ide.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -27,9 +30,35 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test
       - run: bun build src/index.ts --compile --outfile ${{ matrix.out }}
+      # Ship the GoatCode IDE assets (vendored Monaco) alongside the binary.
+      # The IDE server resolves them from ide-vendor/ next to the executable,
+      # or from ~/.goatcode/ide-vendor when the zip/tar is extracted anywhere.
+      - name: Stage IDE vendor
+        shell: bash
+        run: |
+          mkdir -p ide-vendor
+          cp -r src/ide/vendor/vs ide-vendor/vs
+      - name: Package binary + IDE assets (zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "${{ matrix.out }}" dist/
+          Copy-Item ide-vendor dist/ -Recurse -Force
+          Compress-Archive -Path dist/* -DestinationPath ${{ matrix.archive }} -Force
+      - name: Package binary + IDE assets (tar)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "${{ matrix.out }}" dist/
+          cp -r ide-vendor dist/
+          tar -czf ${{ matrix.archive }} -C dist .
       - uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.out }}
+          files: |
+            ${{ matrix.out }}
+            ${{ matrix.archive }}
 
   cross:
     # Bun embeds prebuilt runtimes — one Linux runner ships Apple Silicon,

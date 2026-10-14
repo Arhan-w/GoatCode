@@ -44,7 +44,9 @@ log "platform: $OS-$ARCH"
 mkdir -p "$INSTALL_DIR" "$HOME/.goatcode"
 
 # --- 1. Try the prebuilt release binary ------------------------------------
-# Release assets are named goat-<os>-<arch>[.exe] (see .github/workflows).
+# Release assets are named goat-<os>-<arch>[.exe] plus an *-ide.tar.gz
+# variant that also contains ide-vendor/ (Monaco assets for `goat ide`).
+IDE_DIR="$HOME/.goatcode/ide-vendor"
 fetch_asset() {
   local name="$1"
   local url="https://github.com/$REPO_SLUG/releases/latest/download/$name"
@@ -70,11 +72,53 @@ fetch_asset() {
   return 0
 }
 
-if [ "${GOAT_FORCE_SOURCE:-0}" != "1" ] && fetch_asset "goat-$OS-$ARCH$( [ "$OS" = windows ] && echo .exe )"; then
-  log "installed prebuilt release binary"
-else
+# extract_binary_from_tar: pulls goat<.exe> + ide-vendor/ out of an -ide archive
+extract_ide_archive() {
+  local tmp="$HOME/.goatcode/.dl-ide"
+  rm -rf "$tmp"; mkdir -p "$tmp"
+  tar -xzf "$(wpath "$tmp.tar.gz")" -C "$(wpath "$tmp")" 2>/dev/null || { rm -rf "$tmp"; return 1; }
+  local exe
+  exe=$(find "$tmp" -maxdepth 2 \( -name 'goat*.exe' -o -name goat -type f \) 2>/dev/null | head -1)
+  [ -n "$exe" ] || { rm -rf "$tmp"; return 1; }
+  mv -f "$exe" "$INSTALL_DIR/$BIN_NAME"
+  chmod +x "$INSTALL_DIR/$BIN_NAME" 2>/dev/null || true
+  if [ -d "$tmp/ide-vendor" ]; then
+    rm -rf "$IDE_DIR"; mv "$tmp/ide-vendor" "$IDE_DIR"
+    log "IDE assets installed → $IDE_DIR"
+  fi
+  rm -rf "$tmp"
+  return 0
+}
+
+download_ide_archive() {
+  local name="goat-$OS-$ARCH-ide.tar.gz"
+  local url="https://github.com/$REPO_SLUG/releases/latest/download/$name"
+  local tmp="$HOME/.goatcode/.dl-ide.tar.gz"
+  rm -f "$tmp"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "$(wpath "$tmp")" "$url" 2>/dev/null || return 1
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O "$(wpath "$tmp")" "$url" 2>/dev/null || return 1
+  else
+    return 1
+  fi
+  [ -s "$tmp" ] || { rm -f "$tmp"; return 1; }
+  extract_ide_archive
+}
+
+if [ "${GOAT_FORCE_SOURCE:-0}" != "1" ]; then
+  if download_ide_archive; then
+    log "installed prebuilt release binary + IDE assets"
+  elif fetch_asset "goat-$OS-$ARCH$( [ "$OS" = windows ] && echo .exe )"; then
+    log "installed prebuilt release binary (no IDE assets on this release)"
+  fi
+fi
+
+if [ ! -f "$INSTALL_DIR/$BIN_NAME" ]; then
   # --- 2. Fallback: build from source with Bun ----------------------------
-  warn "no prebuilt binary for $OS-$ARCH (or download failed) — building from source"
+  if [ "${GOAT_FORCE_SOURCE:-0}" != "1" ]; then
+    warn "no prebuilt binary for $OS-$ARCH (or download failed) — building from source"
+  fi
   if ! command -v bun >/dev/null 2>&1; then
     log "installing bun"
     if command -v curl >/dev/null 2>&1; then curl -fsSL https://bun.sh/install | bash

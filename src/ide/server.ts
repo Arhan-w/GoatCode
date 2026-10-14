@@ -236,16 +236,20 @@ export async function runIde(opts: IdeOpts = {}): Promise<void> {
       return new Response(UI_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
     }
 
-    // vendored Monaco — immutable, local. Resolved relative to this module in
-    // dev (src/ide/vendor) and to the executable's directory for compiled
-    // binaries (the release workflow copies ide-vendor/ next to the binary).
+    // vendored Monaco — immutable, local. In dev this resolves to
+    // src/ide/vendor (this module's directory). In a `bun build --compile`
+    // binary import.meta.dir is a virtual path, so we also try beside the
+    // executable (ide-vendor/, copied by the release workflow / installer)
+    // and ~/.goatcode/ide-vendor (written on first run by the updater).
     if (path.startsWith("/vendor/vs/")) {
       const rel = decodeURIComponent(path.slice("/vendor/".length)).replaceAll("\\", "/");
       if (rel.includes("..")) return new Response("forbidden", { status: 403 });
       const { dirname } = await import("node:path");
+      const home = process.env.GOATCODE_HOME || join(process.env.USERPROFILE || process.env.HOME || ".", ".goatcode");
       const candidates = [
-        join(import.meta.dir, "vendor", rel),
         join(dirname(process.execPath), "ide-vendor", rel),
+        join(home, "ide-vendor", rel),
+        join(import.meta.dir, "vendor", rel),
       ];
       let body: Buffer | null = null;
       for (const file of candidates) {

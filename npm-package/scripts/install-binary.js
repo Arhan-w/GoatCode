@@ -29,6 +29,23 @@ function assetName() {
   return `goat-${os}-${arch}${exe}`;
 }
 
+/** Name of the -ide archive that bundles the binary + vendored Monaco. */
+function ideArchiveName() {
+  const osMap = { darwin: "darwin", linux: "linux", win32: "windows" };
+  const archMap = { x64: "x64", arm64: "arm64" };
+  const os = osMap[process.platform];
+  const arch = archMap[process.arch];
+  if (!os || !arch) return null;
+  return `goat-${os}-${arch}-ide.tar.gz`;
+}
+
+/** Where `goat ide` looks for the vendored Monaco assets (ide/server.ts). */
+function ideVendorPath() {
+  const base = process.env.GOATCODE_HOME
+    || path.join(process.env.USERPROFILE || process.env.HOME || ".", ".goatcode");
+  return path.join(base, "ide-vendor");
+}
+
 function targetPath() {
   return path.join(PKG_BIN, process.platform === "win32" ? "goat.exe" : "goat");
 }
@@ -56,6 +73,8 @@ function install(cb) {
   fs.mkdirSync(PKG_BIN, { recursive: true });
   const target = targetPath();
   const part = target + ".download";
+  const archive = ideArchiveName();
+  const archivePart = path.join(PKG_BIN, "ide.tar.gz.download");
   const urls = [
     `https://github.com/${REPO}/releases/download/v${VERSION}/${name}`,
     `https://github.com/${REPO}/releases/latest/download/${name}`,
@@ -69,7 +88,35 @@ function install(cb) {
           if (fs.statSync(part).size < 1_000_000) throw new Error("downloaded file too small");
           fs.renameSync(part, target);
           fs.chmodSync(target, 0o755);
-          return cb(null, target);
+          // best-effort: fetch the -ide archive for the vendored Monaco assets.
+          // Failure here only means `goat ide` 404s its editor assets until
+          // the next install; the agent + TUI are unaffected.
+          if (archive) {
+            get(`https://github.com/${REPO}/releases/download/v${VERSION}/${archive}`, 3, archivePart, (aerr) => {
+              if (aerr) return cb(null, target);
+              try {
+                if (fs.statSync(archivePart).size < 100_000) throw new Error("ide archive too small");
+                const { execFileSync } = require("child_process");
+                const stage = path.join(PKG_BIN, ".ide-stage");
+                fs.rmSync(stage, { recursive: true, force: true });
+                fs.mkdirSync(stage, { recursive: true });
+                execFileSync("tar", ["-xzf", archivePart, "-C", stage], { stdio: "ignore" });
+                const src = path.join(stage, "ide-vendor");
+                if (fs.existsSync(src)) {
+                  const dest = ideVendorPath();
+                  fs.rmSync(dest, { recursive: true, force: true });
+                  fs.mkdirSync(path.dirname(dest), { recursive: true });
+                  fs.renameSync(src, dest);
+                }
+                fs.rmSync(stage, { recursive: true, force: true });
+              } catch { /* non-fatal */ }
+              try { fs.rmSync(archivePart, { force: true }); } catch { /* */ }
+              cb(null, target);
+            });
+          } else {
+            cb(null, target);
+          }
+          return;
         } catch (e) { err = e; }
       }
       try { fs.rmSync(part, { force: true }); } catch { /* */ }
