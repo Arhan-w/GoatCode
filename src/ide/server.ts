@@ -130,6 +130,12 @@ export async function runIde(opts: IdeOpts = {}): Promise<void> {
       extraSystem: [buildExtraSystem(allSkills(cfg), root, resolveRepos(cfg.repos, root)),
         loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
       customAgents: loadCustomAgents(...agentDirs(root)),
+      budgetUsd: cfg.budgetUsd,
+      resolveClientFor: async (model) => {
+        const alt = { ...cfg, model };
+        splitModel(alt);
+        return (await resolve(alt, registry)).client;
+      },
     });
   }
 

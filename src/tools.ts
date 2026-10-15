@@ -1228,11 +1228,11 @@ function builtinSpecs(): ToolSpec[] {
         glob: { type: "string", description: "Filename filter, e.g. '*.py'" },
       }, required: ["pattern"] } },
     { name: "task", description:
-      "Launch a focused sub-agent with a fresh context that shares your tools. It has ZERO knowledge of this conversation — brief it completely. EMIT MULTIPLE task calls in ONE message to fan them out in parallel (up to 8 at once). Use for research/exploration (subagent_type 'explore' = read-only) or self-contained multi-step work. It returns one final report; you must summarize it for the user.",
+      "Launch a focused sub-agent with a fresh context that shares your tools. It has ZERO knowledge of this conversation — brief it completely. EMIT MULTIPLE task calls in ONE message to fan them out in parallel (up to 8 at once). Use for research/exploration (subagent_type 'explore' = read-only), self-contained multi-step work ('general' = full tools), or a custom agent type (listed in the system prompt) for its specialized persona.",
       parameters: { type: "object", properties: {
         description: { type: "string", description: "3-5 word label" },
         prompt: { type: "string", description: "Full task brief for the sub-agent" },
-        subagent_type: { type: "string", enum: ["explore", "general"], description: "explore = read-only research; general = full tools" },
+        subagent_type: { type: "string", description: "'explore' (read-only), 'general' (full tools, default), or a custom agent name" },
       }, required: ["description", "prompt"] } },
     { name: "webfetch", description: "Fetch a URL and return readable text. Blocked for private/localhost addresses.",
       parameters: { type: "object", properties: {

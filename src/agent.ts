@@ -9,7 +9,8 @@ import { Session, summarize } from "./session.ts";
 import { ToolKit, getToolSpec, type PermissionFn, type Todo, type ToolEvent, type ToolResult } from "./tools.ts";
 import type { AgentDef } from "./agents/loader.ts";
 import { fireHooks, MAX_STOP_HOOK_CONTINUES } from "./hooks.ts";
-import { SUBAGENT_MAX_STEPS } from "./constants.ts";
+import { SUBAGENT_MAX_STEPS, ULTRACODE_FANOUT } from "./constants.ts";
+import { costUsd } from "./pricing.ts";
 import { ConfigError, ProviderError, AuthError, RateLimitError, GoatError, GenericError } from "./errors.ts";
 
 export const COMPACT_TRIGGER_CHARS = 220_000;
@@ -28,7 +29,7 @@ export type AgentEvent =
   | { kind: "thinking"; text: string }
   | { kind: "tool_start"; tool: string; args: Record<string, unknown>; callId?: string }
   | { kind: "tool_output"; callId: string; tool: string; text: string }
-  | { kind: "tool_end"; tool: string; result: string; ok: boolean; callId?: string }
+  | { kind: "tool_end"; tool: string; result: string; ok: boolean; callId?: string; durationMs?: number }
   | { kind: "usage"; text: string; usage?: { prompt: number; completion: number; cacheRead?: number; cacheWrite?: number } }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
   | { kind: "retry"; attempt: number; waitMs: number; reason: string }
@@ -73,6 +74,12 @@ export interface AgentDeps {
    *  Powers the custom-agent `model:` override; when absent (tests) the
    *  override falls back to the parent's client. */
   resolveClientFor?: (model: string) => Promise<ChatClient>;
+  /** Hard spend ceiling in USD for this session. When the accumulated cost
+   *  (priced models only) reaches it, the turn stops with a clear error
+   *  instead of burning silently. Unset or 0 = no cap. */
+  budgetUsd?: number;
+  /** Auto-title the session with the small model after the first turn. */
+  autoTitle?: boolean;
 }
 
 export class Agent {
@@ -94,6 +101,10 @@ export class Agent {
   customAgents: AgentDef[];
   /** Model-string -> live client resolver for custom-agent model overrides. */
   resolveClientFor?: (model: string) => Promise<ChatClient>;
+  /** Hard spend ceiling (USD); turn stops when the priced cost reaches it. */
+  budgetUsd: number;
+  /** Generate a session title with the model after the first turn. */
+  autoTitle: boolean;
   /** Real prompt-token count of the most recent API call (true context size). */
   lastPromptTokens = 0;
   /** Circuit breaker: tracks consecutive failures per provider to avoid rapid re-failure. */
@@ -118,8 +129,10 @@ export class Agent {
     this.disallowedTools = deps.disallowedTools ?? new Set();
     this.fallbacks = deps.fallbacks ? [...deps.fallbacks] : [];
     this.cache = deps.cache ?? false;
-this.customAgents = deps.customAgents ?? [];
+    this.customAgents = deps.customAgents ?? [];
     this.resolveClientFor = deps.resolveClientFor;
+    this.budgetUsd = deps.budgetUsd ?? 0;
+    this.autoTitle = deps.autoTitle ?? false;
     if (deps.onToolEvent) this.tools.toolEvent = deps.onToolEvent;
   }
 
@@ -201,6 +214,22 @@ this.customAgents = deps.customAgents ?? [];
       }
       if (!toolCalls.length) {
         this.session.append({ role: "assistant", content: assistantText });
+        // Spend-budget guard (checked on the natural turn end, never mid-stream):
+        // priced models only — unpriced ones can't be measured and never trip.
+        if (this.budgetUsd > 0) {
+          const spent = costUsd(this.session.model, this.session.usage);
+          if (spent != null && spent >= this.budgetUsd) {
+            this.session.save();
+            yield { kind: "error", text: `spend budget reached: $${spent.toFixed(2)} of $${this.budgetUsd.toFixed(2)} (budget_usd in config) — raise it or switch to a cheaper model to continue` };
+            return;
+          }
+        }
+        // Auto-title: after the first exchange, ask the small (or main) model
+        // for a short title. Best-effort — failures never affect the turn.
+        if (this.autoTitle && !this.session.titleTouched) {
+          this.session.titleTouched = true;
+          void this.autoTitleSession();
+        }
         // Stop hooks: a blocking hook feeds its reason back as a new user turn
         // (capped) — Claude's "keep going until the guard is satisfied" model.
         if (this.tools.hooks?.Stop?.length && stopContinues < MAX_STOP_HOOK_CONTINUES) {
@@ -224,6 +253,8 @@ this.customAgents = deps.customAgents ?? [];
         role: "assistant", content: assistantText, toolCalls,
       };
       this.session.append(assistantMsg as Message);
+      // per-tool wall clock for the UI (⎿ completed · 2.3s)
+      const durations = new Map<ToolCall, number>();
       // Mark turn start for crash recovery (before tool execution).
       this.session.markTurnStart(this.session.messages.length, toolCalls.map((tc) => ({
         tool: tc.name,
@@ -231,11 +262,12 @@ this.customAgents = deps.customAgents ?? [];
         callId: tc.id,
       })));
       // Dependency-aware parallel scheduler: tools whose writeSets don't overlap
-      // run concurrently (cap 4). Read-only tools (read/grep/glob/...) naturally
-      // batch together; mutating tools (write/edit/bash/todo/...) run sequentially
-      // relative to each other but may overlap with pure reads. Task subagents
-      // are constrained by ULTRACODE_FANOUT and are independent by construction.
-      const MAX_PARALLEL = 4;
+      // run concurrently. Read-only tools (read/grep/glob/...) naturally batch
+      // together; mutating tools (write/edit/bash/todo/...) run sequentially
+      // relative to each other but may overlap with pure reads. GOAT MODE
+      // (bypass) widens the batch to ULTRACODE_FANOUT so `task` calls really
+      // fan out to 8 as promised in the UI.
+      const MAX_PARALLEL = this.tools.goat ? ULTRACODE_FANOUT : 4;
       const results = new Map<ToolCall, ToolResult>();
       const pending: ToolCall[] = [...toolCalls];
       const completed = new Set<string>();
@@ -293,6 +325,7 @@ this.customAgents = deps.customAgents ?? [];
         for (const call of batch) {
           yield { kind: "tool_start", tool: call.name, args: call.arguments, callId: call.id };
         }
+        const batchT0 = Date.now();
         if (batch.length === 1) {
           const call = batch[0];
           const result = await (call.name === "task" && !this.disallowedTools.has("task")
@@ -311,6 +344,8 @@ this.customAgents = deps.customAgents ?? [];
           );
           batch.forEach((call, k) => results.set(call, settled[k]));
         }
+        const batchMs = Date.now() - batchT0;
+        for (const call of batch) durations.set(call, batchMs);
         this.tools.toolEvent = outerToolEvent;
         // Forward streamed output mapped to the model-side call id so the UI
         // can attach deltas to the row it created for this ToolCall.
@@ -331,7 +366,7 @@ this.customAgents = deps.customAgents ?? [];
           content: result.content ?? result.output.slice(0, 60_000),
           toolCallId: call.id, name: call.name,
         });
-        yield { kind: "tool_end", tool: call.name, result: result.output.slice(0, 2000), ok: result.ok, callId: call.id };
+        yield { kind: "tool_end", tool: call.name, result: result.output.slice(0, 2000), ok: result.ok, callId: call.id, durationMs: durations.get(call) };
         if (call.name === "todo" && result.ok)
           yield { kind: "todo", todos: this.tools.plan() };
       }
@@ -482,16 +517,22 @@ this.customAgents = deps.customAgents ?? [];
     const description = String(args.description ?? "subagent").slice(0, 60);
     const agentType = String(args.subagent_type ?? "");
     const explore = agentType === "explore";
-    // custom agent types (loaded from ~/.goatcode/agents, ./agents, ./.goat/agents)
+    // custom agent types (loaded from ./.goat/agents, ./agents, ~/.goatcode/agents)
     const custom = this.customAgents.find((a) => a.name === agentType);
-    const disallowed = new Set(["task", "undo", ...(explore || custom ? ["write", "edit"] : ["write", "edit"]), "computer"]);
-    // a custom agent's tool allowlist hides everything not listed
+    if (agentType && agentType !== "general" && agentType !== "explore" && !custom)
+      return { ok: false, output: `unknown subagent_type "${agentType}" — available: general, explore${this.customAgents.length ? ", " + this.customAgents.map((a) => a.name).join(", ") : ""}` };
+    // explore = read-only; general and custom agents run with their documented
+    // toolsets. task/undo/computer stay off-limits for every subagent.
+    const disallowed = new Set<string>(["task", "undo", "computer"]);
+    if (explore) disallowed.add("write"), disallowed.add("edit"), disallowed.add("multiedit"), disallowed.add("bash");
+    // a custom agent's tool allowlist hides everything not listed (task/undo
+    // are blocked again below regardless of what the allowlist contains)
     if (custom?.tools?.length) {
       const allowed = new Set(custom.tools);
       for (const s of this.tools.specs()) if (!allowed.has(s.name)) disallowed.add(s.name);
-      disallowed.add("task"); // custom agents never spawn subagents
-      disallowed.add("undo"); // and never touch the undo stack
     }
+    disallowed.add("task"); // subagents never spawn subagents
+    disallowed.add("undo"); // and never touch the undo stack
 
     // --- isolated toolkit clone ---
     const subToolKit = this.tools.clone();
@@ -544,6 +585,35 @@ this.customAgents = deps.customAgents ?? [];
     if (!final)
       return { ok: false, output: `subagent "${description}" produced no answer${error ? `: ${error}` : ""}` };
     return { ok: true, output: `[subagent ${description} · ${stepsUsed} tool uses]\n${final.slice(0, 30_000)}` };
+  }
+
+  /**
+   * Auto-title the session from the first exchange using the small model
+   * (fallback: main client). Writes a 3-6 word title, never throws.
+   */
+  private async autoTitleSession(): Promise<void> {
+    const firstUser = [...this.session.messages].find((m) => m.role === "user");
+    if (!firstUser) return;
+    const brief = textOf(firstUser.content).replace(/\s+/g, " ").slice(0, 300);
+    try {
+      let acc = "";
+      for await (const ev of (this.smallClient ?? this.client).streamChat(
+        [
+          { role: "system", content: "Write a 3-6 word title for a coding session started by this request. Plain text only: no quotes, no punctuation at the end, no preamble." },
+          { role: "user", content: brief },
+        ],
+        [],
+        { model: modelId(this.session.model), maxTokens: 24, temperature: 0.3 },
+      )) {
+        if (ev.textDelta) acc += ev.textDelta;
+        if (ev.error) return;
+      }
+      const title = acc.trim().replace(/^["'#\s]+|["'.\s]+$/g, "").slice(0, 60);
+      if (title) {
+        this.session.title = title;
+        this.session.save();
+      }
+    } catch { /* titling is cosmetic — never surface */ }
   }
 
   private maybeCompact(): void {

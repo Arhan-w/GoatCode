@@ -1,6 +1,6 @@
 <div align="center">
 
-# GoatCode v3.4.0
+# GoatCode v3.5.0
 ### 🐐 The Autonomous Multi-Repo AI Coding Agent for the Terminal
 
 [![CI/CD](https://github.com/Arhan-w/GoatCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Arhan-w/GoatCode/actions)
@@ -343,7 +343,7 @@ MIT License © 2026 Arhan (Goated). See [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**[⬆ back to top](#goatcode-v340)**
+**[⬆ back to top](#goatcode-v350)**
 
 Made with 🐐 by [Arhan](https://github.com/Arhan-w)
 

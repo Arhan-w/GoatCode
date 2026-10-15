@@ -39,6 +39,8 @@ export interface SessionData {
   digest: string;
   /** Subagent fork metadata: tracks child sessions spawned from this one. */
   subagentForks?: SubagentFork[];
+  /** Guard so auto-titling runs at most once per session. */
+  titleTouched?: boolean;
   /** Crash recovery marker: set at turn start, cleared on successful completion. */
   crashRecoveryMarker?: {
     turnIndex: number;
@@ -80,6 +82,8 @@ export class Session {
   turnMarks: number[] = [];
   /** Subagent fork metadata: child sessions spawned from this parent. */
   subagentForks: SubagentFork[] = [];
+  /** Guard so auto-titling runs at most once per session. */
+  titleTouched = false;
   /** Crash recovery marker: set at turn start, cleared on successful completion. */
   crashRecoveryMarker?: {
     turnIndex: number;
@@ -189,6 +193,7 @@ export class Session {
         createdAt: this.createdAt,
         usage: this.usage,
         turnMarks: this.turnMarks,
+        titleTouched: this.titleTouched,
         subagentForks: this.subagentForks,
         crashRecoveryMarker: this.crashRecoveryMarker,
         toolState: this.toolState,
@@ -224,6 +229,7 @@ export class Session {
         this.compactedFrom = header.compactedFrom ?? 0;
         if (header.usage) this.usage = { cacheRead: 0, cacheWrite: 0, ...header.usage };
         this.digest = header.digest ?? "";
+        this.titleTouched = Boolean(header.titleTouched);
         this.turnMarks = Array.isArray(header.turnMarks) ? header.turnMarks : [];
         if (Array.isArray(header.subagentForks)) this.subagentForks = header.subagentForks;
         if (header.crashRecoveryMarker) this.crashRecoveryMarker = header.crashRecoveryMarker;

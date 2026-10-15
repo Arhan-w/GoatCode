@@ -13,6 +13,7 @@ import { Session } from "./session.ts";
 import { buildExtraSystem, loadOutputStyle } from "./context.ts";
 import { buildUserContent } from "./refs.ts";
 import { costUsd } from "./pricing.ts";
+import { loadCustomAgents, agentDirs } from "./agents/loader.ts";
 import type { ProviderRegistry } from "./providers.ts";
 
 export interface PrintTurnResult { text: string; session: Session; failed: string; }
@@ -46,6 +47,9 @@ export async function runPrintTurn(opts: {
     cache: cfg.cachePrompts,
     extraSystem: [buildExtraSystem(allSkills(cfg), cwd ?? process.cwd(), resolveRepos(cfg.repos, cwd ?? process.cwd())),
       loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
+    customAgents: loadCustomAgents(...agentDirs(cwd ?? process.cwd())),
+    budgetUsd: cfg.budgetUsd,
+    autoTitle: cfg.autoTitle,
   });
   let outText = "";
   let failed = "";

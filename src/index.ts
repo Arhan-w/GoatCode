@@ -292,7 +292,12 @@ async function main(): Promise<number> {
   }
 
   if (sub === "sessions") {
-    for (const row of listSessions())
+    const rows = listSessions();
+    if (has("--json")) {
+      console.log(JSON.stringify(rows.map((r) => ({ ...r, createdAt: undefined })), null, 2));
+      return 0;
+    }
+    for (const row of rows)
       console.log(`  ${row.id}  ${row.model.padEnd(34)} ${row.title.slice(0, 60)}`);
     return 0;
   }
@@ -528,6 +533,8 @@ async function main(): Promise<number> {
       extraSystem: [buildExtraSystem(allSkills(cfg), process.cwd(), resolveRepos(cfg.repos, process.cwd())),
         loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
       customAgents: loadCustomAgents(...agentDirs(process.cwd())),
+      budgetUsd: cfg.budgetUsd,
+      autoTitle: cfg.autoTitle,
       resolveClientFor: async (model) => {
         const alt = { ...cfg, model };
         splitModel(alt);

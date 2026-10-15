@@ -14,6 +14,7 @@ import { VERSION } from "../constants.ts";
 import { tokenOk } from "./rpc.ts";
 import { ProviderRegistry } from "../providers.ts";
 import { ToolSpec } from "../llm.ts";
+import { loadCustomAgents, agentDirs } from "../agents/loader.ts";
 
 export interface ServeOpts {
   cfg: GoatConfig;
@@ -95,6 +96,9 @@ export async function startServe(opts: ServeOpts): Promise<ServeHandle> {
               maxTokens: cfg.maxTokens, temperature: cfg.temperature, maxSteps: cfg.maxSteps,
               cache: cfg.cachePrompts,
               extraSystem: [buildExtraSystem(allSkills(cfg), reqCwd, roots), loadOutputStyle(cfg.outputStyle)].filter(Boolean).join("\n\n"),
+              customAgents: loadCustomAgents(...agentDirs(reqCwd)),
+              budgetUsd: cfg.budgetUsd,
+              autoTitle: cfg.autoTitle,
             });
             let out = "";
             let failed = "";

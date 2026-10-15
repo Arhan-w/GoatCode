@@ -120,7 +120,11 @@ export async function runSlash(line: string, io: SlashIO): Promise<boolean> {
       const models = p.models.length ? p.models : ["(no catalog models — type any model id)"];
       io.push(
         <Box flexDirection="column">
-          {models.map((m) => <Text key={m}>  {p.id}/{m}</Text>)}
+          {models.map((m) => {
+            const full = `${p.id}/${m}`;
+            const cur = full === io.cfg.model;
+            return <Text key={m}><Text color={cur ? "#4ade80" : undefined}>{cur ? "● " : "  "}</Text>{full}{cur ? <Text dimColor color="#7c8390">  ← current</Text> : null}</Text>;
+          })}
         </Box>,
       );
       return true;
@@ -342,6 +346,11 @@ export async function runSlash(line: string, io: SlashIO): Promise<boolean> {
         io.push(<Text color="#4ade80">  ≈ {fmtUsd(cost)} this session ({io.cfg.model} rates, live)</Text>);
       else
         io.push(<Text dimColor color="#7c8390">  no price known for {io.cfg.model} — tokens still counted above</Text>);
+      if (io.cfg.budgetUsd && io.cfg.budgetUsd > 0) {
+        const spent = cost ?? 0;
+        const pct = Math.min(100, Math.round((spent / io.cfg.budgetUsd) * 100));
+        io.push(<Text color={pct >= 90 ? "#f87171" : pct >= 70 ? "#facc15" : "#7c8390"}>  budget: {fmtUsd(spent)} / {fmtUsd(io.cfg.budgetUsd)} ({pct}%) — the agent stops at 100%</Text>);
+      }
       const saved = cacheSavings(io.cfg.model, u);
       if (saved != null)
         io.push(<Text color="#a855f7">  ⚡ prompt cache: {(u.cacheRead ?? 0).toLocaleString()} tok read — saved ~{fmtUsd(saved)}</Text>);

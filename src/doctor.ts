@@ -9,7 +9,7 @@
  *   status is 'pass' | 'warn' | 'fail'
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { appDir, type McpServerConfig } from "./config.ts";
 import { CredentialStore } from "./providers.ts";
@@ -143,14 +143,6 @@ export class Doctor {
       }
     }
 
-    // Also check environment variable fallbacks
-    const envCreds = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"];
-    for (const envKey of envCreds) {
-      if (process.env[envKey]) {
-        // Has an env-based credential - don't mark as missing
-      }
-    }
-
     if (missing.length > 0) {
       return {
         status: "warn",
@@ -174,9 +166,10 @@ export class Doctor {
       issues.push("Sessions directory missing");
     }
 
-    // Check credentials file
+    // Check credentials file — a first-run install without any stored key is
+    // normal (the user may rely on env vars or Goated-Flash-Free), not a fault.
     if (!existsSync(credentialsPath)) {
-      issues.push("Credentials file missing");
+      // no issue
     } else {
       try {
         const creds = JSON.parse(readFileSync(credentialsPath, "utf8"));
@@ -188,14 +181,17 @@ export class Doctor {
       }
     }
 
-    // Check for corrupt session files
+    // Check for corrupt session files. Sessions are JSONL: the first line is a
+    // meta object, each following line is a message — a whole-file JSON.parse
+    // would flag every valid session as corrupt.
     if (existsSync(sessionsDir)) {
-      const sessionFiles = require("node:fs").readdirSync(sessionsDir);
+      const sessionFiles = readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
       for (const f of sessionFiles) {
         const filePath = join(sessionsDir, f);
         try {
-          const content = readFileSync(filePath, "utf8");
-          JSON.parse(content); // validate JSON
+          const lines = readFileSync(filePath, "utf8").split("\n").filter(Boolean);
+          if (!lines.length) continue;
+          JSON.parse(lines[0]); // meta line must be valid JSON
         } catch {
           issues.push(`Corrupt session file: ${f}`);
         }
@@ -393,13 +389,13 @@ export class Doctor {
       return;
     }
 
-    const sessionFiles = require("node:fs").readdirSync(sessionsDir);
+    const sessionFiles = readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
     let repaired = 0;
     for (const f of sessionFiles) {
       const filePath = join(sessionsDir, f);
       try {
-        const content = readFileSync(filePath, "utf8");
-        JSON.parse(content); // just validate
+        const lines = readFileSync(filePath, "utf8").split("\n").filter(Boolean);
+        if (lines.length) JSON.parse(lines[0]); // meta line must parse
         repaired++;
       } catch {
         // Could attempt to remove or fix, but we'll just count
@@ -436,9 +432,10 @@ export async function runDoctor(
     }
   }
 
-  // Return exit code: 2 if any fail, 1 if any warn, 0 if all pass
+  // Exit code: 2 when a check FAILS, 0 for pass/warn. Warnings (like missing
+  // optional credentials on a first-run install) are informational — treating
+  // them as failures broke `goat doctor` in scripts and CI.
   const hasFail = results.some((r) => r.status === "fail");
-  const hasWarn = results.some((r) => r.status === "warn") && !hasFail;
 
-  return hasFail ? 2 : hasWarn ? 1 : 0;
+  return hasFail ? 2 : 0;
 }

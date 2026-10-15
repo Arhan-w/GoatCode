@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
 let home: string;
 let root: string;
 const savedEnv: Record<string, string | undefined> = {};
@@ -113,5 +112,145 @@ describe("custom agents", () => {
     // none configured -> no block
     const plain = buildSystemPrompt("/w");
     expect(plain).not.toContain("Custom subagents available");
+  });
+
+  test("project-level agents win name collisions over user-level (docs/AGENTS.md)", async () => {
+    const { loadCustomAgents } = await import("../src/agents/loader.ts");
+    const projDir = mkdtempSync(join(tmpdir(), "goat-ag-proj-"));
+    // "reviewer" defined in both: user says generic, project says specific
+    const userDir = join(home, "agents");
+    mkdirSync(userDir, { recursive: true });
+    writeFileSync(join(userDir, "reviewer.md"),
+      "---\ndescription: USER-level reviewer\n---\nuser body\n");
+    writeFileSync(join(projDir, "reviewer.md"),
+      "---\ndescription: PROJECT-level reviewer\n---\nproject body\n");
+    // project roots come first in agentDirs -> project wins
+    const agents = loadCustomAgents(projDir, userDir);
+    expect(agents.length).toBe(1);
+    expect(agents[0].description).toBe("PROJECT-level reviewer");
+    rmSync(projDir, { recursive: true, force: true });
+  });
+
+  test("unknown subagent_type returns a clear error listing available types", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const customAgents = [{ name: "reader", description: "reads", body: "b", path: "" }];
+    let childCalls = 0;
+    const client = {
+      async *streamChat(_msgs: any[], _specs: any[]) {
+        childCalls++;
+        yield { textDelta: "done" };
+      },
+    } as any;
+    const session = Session.new(root, "mock/m");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(root, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 4,
+      customAgents,
+    });
+    let parentCalls = 0;
+    client.streamChat = async function* (msgs: any[], specs: any[]) {
+      const isChild = msgs.some((m: any) => String(m.content).includes("SUBTASK"));
+      if (!isChild) {
+        parentCalls++;
+        if (parentCalls === 1)
+          yield { toolCalls: [{ id: "t1", name: "task", arguments: { description: "x", prompt: "SUBTASK go", subagent_type: "nonexistent" } }] };
+        else yield { textDelta: "parent done" };
+      } else {
+        childCalls++;
+        yield { textDelta: "child done" };
+      }
+    };
+    for await (const _ of agent.runTurn("go")) void _;
+    // no child ran; the tool result explains what's available
+    const toolMsg = session.messages.find((m) => m.role === "tool" && m.name === "task");
+    expect(String(toolMsg?.content)).toContain("unknown subagent_type");
+    expect(String(toolMsg?.content)).toContain("reader");
+    expect(childCalls).toBe(0);
+  });
+
+  test("general subagents run with full tools; custom allowlist can include write", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    // custom "builder" agent explicitly allowed write
+    const customAgents = [{
+      name: "builder",
+      description: "builds files",
+      tools: ["read", "write", "bash"],
+      body: "You build.",
+      path: "",
+    }];
+    const childSpecs: string[][] = [];
+    const client = {
+      async *streamChat(_msgs: any[], _specs: any[]) { yield { textDelta: "x" }; },
+    } as any;
+    const session = Session.new(root, "mock/m");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(root, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 4,
+      customAgents,
+    });
+    let parentCalls = 0;
+    client.streamChat = async function* (msgs: any[], specs: any[]) {
+      const isChild = msgs.some((m: any) => String(m.content).includes("SUBTASK"));
+      if (!isChild) {
+        parentCalls++;
+        if (parentCalls === 1)
+          yield { toolCalls: [{ id: "t1", name: "task", arguments: { description: "x", prompt: "SUBTASK build", subagent_type: "builder" } }] };
+        else yield { textDelta: "done" };
+      } else {
+        childSpecs.push(specs.map((s: any) => s.name));
+        yield { textDelta: "child done" };
+      }
+    };
+    for await (const _ of agent.runTurn("go")) void _;
+    const specs = childSpecs[0];
+    // allowlisted tools present (write explicitly granted), task/undo never
+    expect(specs).toContain("write");
+    expect(specs).toContain("read");
+    expect(specs).toContain("bash");
+    expect(specs).not.toContain("task");
+    expect(specs).not.toContain("undo");
+  });
+
+  test("custom agent model override resolves through resolveClientFor", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const customAgents = [{
+      name: "cheap",
+      description: "runs cheap",
+      model: "other/mini",
+      body: "cheap body",
+      path: "",
+    }];
+    let overrideModel = "";
+    const client = { async *streamChat() { yield { textDelta: "x" }; } } as any;
+    const session = Session.new(root, "mock/m");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(root, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 4,
+      customAgents,
+      resolveClientFor: async (model) => {
+        overrideModel = model;
+        return { async *streamChat() { yield { textDelta: "from override client" }; } } as any;
+      },
+    });
+    let parentCalls = 0;
+    client.streamChat = async function* (msgs: any[]) {
+      const isChild = msgs.some((m: any) => String(m.content).includes("SUBTASK"));
+      if (!isChild) {
+        parentCalls++;
+        if (parentCalls === 1)
+          yield { toolCalls: [{ id: "t1", name: "task", arguments: { description: "x", prompt: "SUBTASK cheap", subagent_type: "cheap" } }] };
+        else yield { textDelta: "done" };
+      } else {
+        yield { textDelta: "child done" };
+      }
+    };
+    for await (const _ of agent.runTurn("go")) void _;
+    expect(overrideModel).toBe("other/mini");
   });
 });

@@ -452,6 +452,8 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
         extraSystem: [buildExtraSystem(skills, sessionRef.current.cwd, resolveRepos(cfgRef.current.repos, sessionRef.current.cwd)),
           loadOutputStyle(cfgRef.current.outputStyle)].filter(Boolean).join("\n\n"),
         customAgents: loadCustomAgents(...agentDirs(sessionRef.current.cwd)),
+        budgetUsd: cfgRef.current.budgetUsd,
+        autoTitle: cfgRef.current.autoTitle,
         // custom-agent `model:` overrides resolve through the same path as the
         // primary model (credentials + OAuth refresh included)
         resolveClientFor: async (model) => {
@@ -539,10 +541,14 @@ function App({ initialCfg, resume }: { initialCfg: GoatConfig; resume?: string }
           case "tool_end": {
             setToolLive(null);
             const first = (ev.result || "").split("\n")[0]?.slice(0, 160) ?? "";
+            const dur = ev.durationMs != null && ev.durationMs >= 100
+              ? ` · ${(ev.durationMs / 1000).toFixed(1)}s`
+              : "";
             push(
               <Text>
                 <Text color={ev.ok ? GREEN : RED}>  ⎿ {ev.ok ? "completed" : "failed"}</Text>
                 <Text dimColor color={DIM}>  {first}</Text>
+                {dur ? <Text dimColor color={DIM}>{dur}</Text> : null}
               </Text>,
             );
             // inline unified diff after file mutations (from the undo snapshot)

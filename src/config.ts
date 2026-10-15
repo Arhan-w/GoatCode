@@ -77,6 +77,11 @@ export interface GoatConfig {
   remoteAgents?: { name: string; url: string }[];
   /** Raw parsed config.json — read-only passthrough for keys without a typed field (e.g. serve.port). */
   raw?: Record<string, any>;
+  /** Hard spend ceiling (USD) per session — the agent stops when the priced
+   *  cost reaches it. 0/unset = unlimited. */
+  budgetUsd?: number;
+  /** Auto-title new sessions with the cheap model after the first turn. */
+  autoTitle?: boolean;
   /** Set true after the first-run wizard completes so it isn't shown again. */
   onboardingComplete?: boolean;
 }
@@ -185,6 +190,11 @@ export function loadConfig(projectDir: string = process.cwd()): GoatConfig {
         .filter((r: any) => r && typeof r.name === "string" && typeof r.url === "string")
         .map((r: any) => ({ name: String(r.name), url: String(r.url) }))
       : undefined,
+    budgetUsd: (() => {
+      const n = Number(data.budget_usd ?? data.budgetUsd ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    })(),
+    autoTitle: Boolean(data.auto_title ?? data.autoTitle ?? false),
   };
   for (const [pid, ed] of Object.entries<any>(data.endpoints ?? {})) {
     if (ed && typeof ed === "object") cfg.endpoints[pid] = endpointFrom(pid, ed);
@@ -266,6 +276,10 @@ export function saveConfig(cfg: GoatConfig): void {
   if (cfg.pluginDirs.length) payload.plugins = cfg.pluginDirs;
   if (cfg.pluginRegistry?.url) payload.plugin_registry = { url: cfg.pluginRegistry.url };
   if (cfg.remoteAgents?.length) payload.remote_agents = cfg.remoteAgents;
+  if (cfg.budgetUsd && cfg.budgetUsd > 0) payload.budget_usd = cfg.budgetUsd;
+  else delete payload.budget_usd;
+  if (cfg.autoTitle) payload.auto_title = true;
+  else delete payload.auto_title;
   writeFileSync(configPath(), JSON.stringify(payload, null, 2), "utf8");
 }
 

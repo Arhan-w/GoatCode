@@ -2069,6 +2069,147 @@ describe("computer rules", () => {
   });
 });
 
+// ---------- spend budget ----------
+describe("spend budget", () => {
+  test("config parses budget_usd and saveConfig round-trips it", async () => {
+    const { loadConfig, saveConfig } = await import("../src/config.ts");
+    writeFileSync(join(home, "config.json"), JSON.stringify({ budget_usd: 2.5 }));
+    const cfg = loadConfig(home);
+    expect(cfg.budgetUsd).toBe(2.5);
+    saveConfig(cfg);
+    const cfg2 = loadConfig(home);
+    expect(cfg2.budgetUsd).toBe(2.5);
+    // absent/zero -> undefined (no cap)
+    writeFileSync(join(home, "config.json"), JSON.stringify({ budget_usd: 0 }));
+    expect(loadConfig(home).budgetUsd).toBeUndefined();
+  });
+
+  test("agent stops with a clear error when the priced cost reaches the budget", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    // each usage event = $1 of spend at $2.5/$2.5 per 1M (200k in + 200k out)
+    const client = {
+      async *streamChat() {
+        yield { textDelta: "step" };
+        yield { usage: { prompt: 200_000, completion: 200_000 } };
+        yield { usage: { prompt: 200_000, completion: 200_000 } };
+        yield { usage: { prompt: 200_000, completion: 200_000 } };
+      },
+    } as any;
+    const session = Session.new(home, "anthropic/claude-sonnet-4-5");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 5,
+      budgetUsd: 2.5, // trip mid-stream once $2.5 accumulates
+    });
+    let budgetError = false;
+    let sawDone = false;
+    for await (const ev of agent.runTurn("go")) {
+      if (ev.kind === "error" && ev.text.includes("spend budget reached")) budgetError = true;
+      if (ev.kind === "done") sawDone = true;
+    }
+    expect(budgetError).toBe(true);
+    expect(sawDone).toBe(false); // the turn did not complete normally
+  });
+
+  test("under budget: the turn completes normally", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const client = {
+      async *streamChat() {
+        yield { textDelta: "fine" };
+        yield { usage: { prompt: 100_000, completion: 100_000 } }; // $0.5 sonnet
+      },
+    } as any;
+    const session = Session.new(home, "anthropic/claude-sonnet-4-5");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 5,
+      budgetUsd: 2.5,
+    });
+    let budgetError = false;
+    let sawDone = false;
+    for await (const ev of agent.runTurn("go")) {
+      if (ev.kind === "error" && ev.text.includes("spend budget reached")) budgetError = true;
+      if (ev.kind === "done") sawDone = true;
+    }
+    expect(budgetError).toBe(false);
+    expect(sawDone).toBe(true);
+  });
+
+  test("unpriced models never trip the budget (fail-open)", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const client = {
+      async *streamChat() {
+        yield { textDelta: "x" };
+        yield { usage: { prompt: 500_000, completion: 500_000 } };
+      },
+    } as any;
+    const session = Session.new(home, "totally-unknown-model/xyz");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 3,
+      budgetUsd: 0.01,
+    });
+    let budgetError = false;
+    let sawDone = false;
+    for await (const ev of agent.runTurn("go")) {
+      if (ev.kind === "error" && ev.text.includes("spend budget reached")) budgetError = true;
+      if (ev.kind === "done") sawDone = true;
+    }
+    expect(budgetError).toBe(false);
+    expect(sawDone).toBe(true);
+  });
+});
+
+// ---------- auto title ----------
+describe("auto title", () => {
+  test("session title is set from the small model after the first turn", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const client = { async *streamChat() { yield { textDelta: "done" }; } } as any;
+    const smallClient = {
+      async *streamChat(msgs: any[]) {
+        // the titling call: system asks for a title, user carries the brief
+        const sys = String(msgs[0]?.content ?? "");
+        if (sys.includes("title")) yield { textDelta: '"Fix login flow"' };
+        else yield { textDelta: "main" };
+      },
+    } as any;
+    const session = Session.new(home, "anthropic/claude-sonnet-4-5");
+    const agent = new Agent({
+      client, smallClient, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 3,
+      autoTitle: true,
+    });
+    for await (const _ of agent.runTurn("Please fix the login flow")) void _;
+    expect(session.title).toBe("Fix login flow");
+    expect(session.titleTouched).toBe(true);
+    // second turn does not retitle
+    for await (const _ of agent.runTurn("more work")) void _;
+    expect(session.title).toBe("Fix login flow");
+  });
+
+  test("no autoTitle dep -> title stays untouched", async () => {
+    const { Agent } = await import("../src/agent.ts");
+    const { Session } = await import("../src/session.ts");
+    const { ToolKit } = await import("../src/tools.ts");
+    const client = { async *streamChat() { yield { textDelta: "done" }; } } as any;
+    const session = Session.new(home, "mock/m");
+    const agent = new Agent({
+      client, session, tools: new ToolKit(home, { autoApprove: true }),
+      maxTokens: 10, temperature: null, maxSteps: 3,
+    });
+    for await (const _ of agent.runTurn("hello there")) void _;
+    expect(session.titleTouched).toBe(false);
+  });
+});
+
 // ---------- update checks ----------
 describe("update", () => {
   test("versionLess compares semver numerically, not lexically", async () => {

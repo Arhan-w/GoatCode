@@ -2,6 +2,34 @@
 
 All notable changes to GoatCode. Versions match git tags and npm releases.
 
+## [3.5.0] - 2026-10-15
+### Added
+- **Spend budget guard** — set `"budget_usd": 5` in config and the agent stops
+  with a clear message once the session's priced cost reaches it. Unpriced
+  models fail open (never trip). `/cost` shows the budget meter.
+- **Auto-titled sessions** — `"auto_title": true` names new sessions with the
+  small model (`small_model` or main) after the first turn; runs once,
+  best-effort, persisted across resume.
+- **Tool duration in the transcript** — `⎿ completed · 2.3s` on every tool
+  result line (parallel batches share the batch wall clock).
+- **ULTRACODE fanout honored** — GOAT MODE (bypass) widens the parallel tool
+  batch to 8, so `task` calls truly fan out as the footer promises; 4 otherwise.
+- **`goat sessions --json`** — machine-readable session list for scripts.
+- **`/models` marks the current model** with a `●` and "← current".
+
+### Fixed
+- **Subagent toolsets per spec** (docs/AGENTS.md): `general` subagents now run
+  with full tools (write/edit included) instead of a bogus read-only set;
+  custom agents' `tools:` allowlist is honored exactly (can include write);
+  unknown `subagent_type` returns a clear error listing every available type.
+- **`goat doctor` false positives**: sessions are JSONL — the old whole-file
+  `JSON.parse` flagged every valid session "corrupt"; a missing
+  credentials.json on first run is normal, not a fault; warnings no longer
+  produce a non-zero exit code (only real failures do, so `goat doctor` works
+  in scripts/CI); dead `require("node:fs")` calls replaced with imports.
+- Custom-agent `model:` override now resolves end-to-end (agent → runtime) in
+  TUI, print mode, IDE and `goat serve`.
+
 ## [3.4.0] - 2026-10-15
 ### Added
 - **Custom subagent `model:` override** — custom agents (`.goat/agents/NAME.md`) can now declare `model: provider/model` in frontmatter to run on a different model than the parent. Resolved through the same credential/OAuth path.
